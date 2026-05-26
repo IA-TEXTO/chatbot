@@ -1,0 +1,31 @@
+name: Contar artefatos de código
+
+on:
+  workflow_dispatch:
+
+jobs:
+  contar:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Baixar repositório
+        uses: actions/checkout@v4
+
+      - name: Contar arquivos de código
+        run: |
+          echo "## Relatório de artefatos de código" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          echo "### Total de arquivos de código" >> $GITHUB_STEP_SUMMARY
+          git ls-files | grep -E '\.(py|java|js|ts|tsx|jsx|html|css|sql|c|cpp|h|cs|php|rb|go|rs|kt|swift)$' | wc -l >> $GITHUB_STEP_SUMMARY
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Quantidade por extensão" >> $GITHUB_STEP_SUMMARY
+          echo '```text' >> $GITHUB_STEP_SUMMARY
+          git ls-files \
+            | grep -E '\.[a-zA-Z0-9]+$' \
+            | sed 's/.*\.//' \
+            | sort \
+            | uniq -c \
+            | sort -nr >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
