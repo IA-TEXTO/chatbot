@@ -15,11 +15,17 @@ document.addEventListener("DOMContentLoaded", () => {
 	axios.defaults.xsrfCookieName = "csrftoken";
 	axios.defaults.xsrfHeaderName = "X-CSRFToken";
 
-	const pageElement = document.querySelector('script[data-page="app"]');
-	if (!pageElement?.textContent) {
+	// inertia-django 1.x serializa a página no atributo data-page do #app,
+	// enquanto versões mais novas podem usar um script JSON separado.
+	// Aceitar ambos mantém desenvolvimento e produção compatíveis.
+	const appElement = document.getElementById("app");
+	const pageScript = document.querySelector('script[data-page="app"]');
+	const serializedPage = pageScript?.textContent || appElement?.dataset.page;
+
+	if (!serializedPage) {
 		throw new Error("Dados iniciais do Inertia não encontrados no HTML.");
 	}
-	const initialPage = JSON.parse(pageElement.textContent);
+	const initialPage = JSON.parse(serializedPage);
 
 	createInertiaApp({
 		page: initialPage,
