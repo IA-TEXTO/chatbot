@@ -1,5 +1,6 @@
 services:
   chatbot-integracar:
+    image: chatbot-integracar:latest
     build:
       context: .
       dockerfile: prod.Dockerfile
@@ -18,9 +19,7 @@ services:
       - proxy
 
   qcluster:
-    build:
-      context: .
-      dockerfile: prod.Dockerfile
+    image: chatbot-integracar:latest
     volumes:
       - app_shared:/code/media
     env_file:

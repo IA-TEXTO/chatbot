@@ -36,5 +36,4 @@ jobs:
             cd chatbot
             git fetch origin
             git reset --hard origin/main
-            sudo docker compose -f docker-compose.prod.yaml down
             sudo docker compose -f docker-compose.prod.yaml up --build -d --remove-orphans
