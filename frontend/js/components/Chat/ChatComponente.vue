@@ -37,6 +37,7 @@ const erroEnvio = ref('');
 const editable = ref<HTMLElement | null>(null);
 const containerMensagens = ref<HTMLElement | null>(null);
 const mensagemRef = ref<typeof Mensagem | null>(null);
+let proximoIdTemporario = -1;
 
 const perguntasSugeridas = [
     'Quais documentos eu preciso para iniciar o CAR?',
@@ -119,34 +120,74 @@ function limparInput() {
     }
 }
 
-async function enviarMensagem() {
-    if (!pergunta.value.trim() || enviandoMensagem.value) return;
+function gerarIdTemporario() {
+    return proximoIdTemporario--;
+}
+
+function substituirIdFilho(idPai: number, idAntigo: number, idNovo: number) {
+    const filhos = mapMensagens.value[idPai]?.mensagens_filhas;
+    if (!filhos) return;
+
+    const index = filhos.indexOf(idAntigo);
+    if (index !== -1) filhos[index] = idNovo;
+}
+
+function aplicarIdsPersistidos(
+    dados: chatResponse,
+    mensagemUsuario: TMensagem,
+    botMessage: TMensagem,
+) {
+    idConversa.value = dados.id_conversa;
+
+    const idAntigoUsuario = mensagemUsuario.id;
+    mensagemUsuario.id = dados.id_mensagem_pergunta;
+    delete mapMensagens.value[idAntigoUsuario];
+    mapMensagens.value[mensagemUsuario.id] = mensagemUsuario;
+
+    if (mensagemUsuario.mensagem_pai !== null) {
+        substituirIdFilho(
+            mensagemUsuario.mensagem_pai,
+            idAntigoUsuario,
+            mensagemUsuario.id,
+        );
+    }
+
+    const idAntigoBot = botMessage.id;
+    botMessage.id = dados.id_mensagem_resposta;
+    botMessage.mensagem_pai = mensagemUsuario.id;
+    delete mapMensagens.value[idAntigoBot];
+    mapMensagens.value[botMessage.id] = botMessage;
+    substituirIdFilho(mensagemUsuario.id, idAntigoBot, botMessage.id);
+}
+
+async function criarRamificacao(
+    conteudo: string,
+    idMensagemPai: number | null,
+    idMensagemEditada: number | null = null,
+) {
+    const mensagem = conteudo.trim();
+    if (!mensagem || enviandoMensagem.value) return;
 
     erroEnvio.value = '';
     enviandoMensagem.value = true;
-    const mensagemPaiSelecionada: number | null = mensagensRaiz.value.length > 0 ? mensagemRef.value?.obterIdUltimaMensagem() ?? null : null;
+
     const mensagemUsuario: TMensagem = {
-        id: Date.now() + Math.floor(Math.random() * 1000),
+        id: gerarIdTemporario(),
         tipo: 'USUARIO',
-        conteudo: pergunta.value.trim(),
-        mensagem_pai: mensagemPaiSelecionada,
+        conteudo: mensagem,
+        mensagem_pai: idMensagemPai,
         mensagens_filhas: [],
         curtido: null,
     };
 
-    if (mensagemPaiSelecionada !== null) {
-        mapMensagens.value[mensagemPaiSelecionada].mensagens_filhas.push(mensagemUsuario.id);
+    if (idMensagemPai !== null) {
+        mapMensagens.value[idMensagemPai].mensagens_filhas.push(mensagemUsuario.id);
     }
 
     await adicionarMensagem(mensagemUsuario);
 
-    const lastUserMessage = pergunta.value;
-    limparInput();
-    await nextTick();
-    focarInputMensagem(false);
-
     const botMessage: TMensagem = {
-        id: Date.now() + Math.floor(Math.random() * 1000) + 1,
+        id: gerarIdTemporario(),
         tipo: 'ASSISTENTE',
         conteudo: '',
         mensagem_pai: mensagemUsuario.id,
@@ -158,9 +199,10 @@ async function enviarMensagem() {
     await adicionarMensagem(botMessage);
 
     const payload = {
-        mensagem: lastUserMessage,
+        mensagem,
         stream: true,
-        id_mensagem_pai: mensagemPaiSelecionada,
+        id_mensagem_pai: idMensagemPai,
+        id_mensagem_editada: idMensagemEditada,
         id_conversa: idConversa.value,
     };
 
@@ -173,68 +215,88 @@ async function enviarMensagem() {
             body: JSON.stringify(payload),
         });
 
+        if (!response.ok) {
+            throw new Error(`Falha ao enviar mensagem: HTTP ${response.status}`);
+        }
+
         if (!response.body) {
-            mapMensagens.value[botMessage.id].conteudo = 'Não foi possível obter resposta do assistente.';
-            erroEnvio.value = 'Falha de conexão com o assistente.';
-            return;
+            throw new Error('Resposta sem corpo de streaming.');
         }
 
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
 
-        let primeiro = true;
-        let idMensagemBot = botMessage.id;
+        let cabecalhoProcessado = false;
+        let buffer = '';
+
         while (true) {
             const { value, done } = await reader.read();
+            buffer += decoder.decode(value, { stream: !done });
 
-            if (done) break;
-            if (primeiro) {
-                primeiro = false;
-                const dados: chatResponse = JSON.parse(decoder.decode(value));
-                idConversa.value = dados.id_conversa;
-
-                const idAntigoUsuario = mensagemUsuario.id;
-                const novoIdUsuario = dados.id_mensagem_pergunta;
-                mensagemUsuario.id = novoIdUsuario;
-                delete mapMensagens.value[idAntigoUsuario];
-                mapMensagens.value[novoIdUsuario] = mensagemUsuario;
-
-                if (mensagemPaiSelecionada !== null) {
-                    const filhas = mapMensagens.value[mensagemPaiSelecionada].mensagens_filhas;
-                    const index = filhas.indexOf(idAntigoUsuario);
-                    if (index !== -1) {
-                        filhas[index] = novoIdUsuario;
-                    }
+            if (!cabecalhoProcessado) {
+                const fimCabecalho = buffer.indexOf('\n');
+                if (fimCabecalho === -1 && !done) continue;
+                if (fimCabecalho === -1) {
+                    throw new Error('Metadados da resposta não recebidos.');
                 }
 
-                const idAntigoBot = botMessage.id;
-                const novoIdBot = dados.id_mensagem_resposta;
-                botMessage.id = novoIdBot;
-                botMessage.mensagem_pai = novoIdUsuario;
-                delete mapMensagens.value[idAntigoBot];
-                mapMensagens.value[novoIdBot] = botMessage;
-                idMensagemBot = novoIdBot;
-
-                const filhasUsuario = mapMensagens.value[novoIdUsuario].mensagens_filhas;
-                const indexBot = filhasUsuario.indexOf(idAntigoBot);
-                if (indexBot !== -1) {
-                    filhasUsuario[indexBot] = novoIdBot;
-                }
-
-                continue;
+                const dados: chatResponse = JSON.parse(
+                    buffer.slice(0, fimCabecalho),
+                );
+                aplicarIdsPersistidos(dados, mensagemUsuario, botMessage);
+                cabecalhoProcessado = true;
+                buffer = buffer.slice(fimCabecalho + 1);
             }
 
-            mapMensagens.value[idMensagemBot].conteudo += decoder.decode(value);
-            scrollParaUltimaMensagem();
+            if (buffer) {
+                const mensagemBotReativa = mapMensagens.value[botMessage.id];
+                if (mensagemBotReativa) {
+                    mensagemBotReativa.conteudo += buffer;
+                }
+                buffer = '';
+                await nextTick();
+                scrollParaUltimaMensagem();
+            }
+
+            if (done) break;
         }
     } catch (error) {
-        botMessage.conteudo = 'Ocorreu um erro ao enviar sua mensagem. Tente novamente.';
+        const mensagemBotReativa = mapMensagens.value[botMessage.id];
+        if (mensagemBotReativa) {
+            mensagemBotReativa.conteudo = 'Ocorreu um erro ao enviar sua mensagem. Tente novamente.';
+        }
         erroEnvio.value = 'Não foi possível enviar sua pergunta agora.';
+        console.error(error);
     } finally {
         enviandoMensagem.value = false;
         await nextTick();
         focarInputMensagem();
     }
+}
+
+async function enviarMensagem() {
+    const mensagem = pergunta.value.trim();
+    if (!mensagem || enviandoMensagem.value) return;
+
+    const idMensagemPai = mensagensRaiz.value.length > 0
+        ? mensagemRef.value?.obterIdUltimaMensagem() ?? null
+        : null;
+
+    limparInput();
+    await nextTick();
+    focarInputMensagem(false);
+    await criarRamificacao(mensagem, idMensagemPai);
+}
+
+async function editarMensagem(idMensagem: number, novoConteudo: string) {
+    const mensagemOriginal = mapMensagens.value[idMensagem];
+    if (!mensagemOriginal || mensagemOriginal.tipo !== 'USUARIO') return;
+
+    await criarRamificacao(
+        novoConteudo,
+        mensagemOriginal.mensagem_pai,
+        mensagemOriginal.id,
+    );
 }
 
 function handlePaste(e: ClipboardEvent) {
@@ -298,7 +360,8 @@ onUnmounted(() => {
                 </div>
 
                 <Mensagem ref="mensagemRef" v-if="mensagensRaiz.length > 0" :map-mensagens="mapMensagens"
-                    :ids="mensagensRaiz" />
+                    :ids="mensagensRaiz" :edicao-desabilitada="enviandoMensagem"
+                    @editar-mensagem="editarMensagem" />
             </div>
         </div>
 

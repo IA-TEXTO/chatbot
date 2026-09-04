@@ -1,8 +1,7 @@
 import re
+from collections.abc import Iterable
 
 from django.contrib.auth.decorators import login_required
-from django.contrib.postgres.aggregates import ArrayAgg
-from django.db.models import F
 from django.http import HttpRequest
 from django.shortcuts import get_object_or_404, redirect
 from django.utils import timezone
@@ -13,6 +12,31 @@ from inertia import render, share
 
 from chat.forms import ImportarDocumentosForm
 from chat.models import Conversa, Documento, Mensagem, StatusDocumento
+
+
+def montar_arvore_mensagens(
+    mensagens: Iterable[Mensagem],
+) -> dict[int, dict]:
+    mensagens_ordenadas = list(mensagens)
+    map_mensagens = {
+        mensagem.id: {
+            'id': mensagem.id,
+            'conteudo': mensagem.conteudo,
+            'tipo': mensagem.tipo,
+            'mensagem_pai': mensagem.mensagem_pai_id,
+            'mensagens_filhas': [],
+            'curtido': mensagem.curtido,
+        }
+        for mensagem in mensagens_ordenadas
+    }
+
+    for mensagem in mensagens_ordenadas:
+        if mensagem.mensagem_pai_id in map_mensagens:
+            map_mensagens[mensagem.mensagem_pai_id][
+                'mensagens_filhas'
+            ].append(mensagem.id)
+
+    return map_mensagens
 
 
 class BaseChatView(View):
@@ -28,31 +52,11 @@ class IndexView(BaseChatView):
 @method_decorator(login_required, name='dispatch')
 class ConversaView(BaseChatView):
     def _gerar_map_mensagens(self, conversa: Conversa):
-        mensagens = (
-            Mensagem.objects.filter(conversa=conversa)
-            .order_by('criado_em')
-            .annotate(
-                mensagens_filhas=ArrayAgg(
-                    F('filhos__id'),
-                    distinct=True,
-                )
-            )
+        mensagens = Mensagem.objects.filter(conversa=conversa).order_by(
+            'criado_em',
+            'id',
         )
-        map_mensagens = {}
-
-        for mensagem in mensagens:
-            map_mensagens[mensagem.id] = {
-                'id': mensagem.id,
-                'conteudo': mensagem.conteudo,
-                'tipo': mensagem.tipo,
-                'mensagem_pai': mensagem.mensagem_pai_id,
-                'mensagens_filhas': mensagem.mensagens_filhas
-                if mensagem.mensagens_filhas != [None]
-                else [],
-                'curtido': mensagem.curtido,
-            }
-
-        return map_mensagens
+        return montar_arvore_mensagens(mensagens)
 
     def get(self, request: HttpRequest, id_conversa: int):
         if request.user.is_superuser:

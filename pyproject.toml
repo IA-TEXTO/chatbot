@@ -22,6 +22,7 @@ dependencies = [
     "pypdf>=6.4.0",
     "django-cte>=2.0.0",
     "django-import-export>=4.4.0",
+    "agno>=3.0.5",
 ]
 
 [dependency-groups]

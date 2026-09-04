@@ -1,14 +1,15 @@
 import json
 
+from agno.exceptions import AgnoError
 from django.db import transaction
 from django.http import HttpRequest, StreamingHttpResponse
 from django.shortcuts import get_object_or_404
 from django_cte import CTE, with_cte
 from ninja import Router
-from openai import APIConnectionError
+from openai import OpenAIError
 
+from chat.agents import IntegraCARAgentWorkflow
 from chat.models import Conversa, Documento, Mensagem
-from chat.rag import Rag
 from chat.schemas import (
     AtualizarTipoDocumentoSchema,
     ChatSchema,
@@ -16,22 +17,48 @@ from chat.schemas import (
 )
 
 chat_router = Router()
+agent_workflow = IntegraCARAgentWorkflow()
+AI_ERRORS = (AgnoError, OpenAIError)
+AI_ERROR_MESSAGE = (
+    'Não foi possível gerar a resposta agora. Tente novamente em instantes.'
+)
 
 
-@chat_router.post('/chat')
-def chat_endpoint(request: HttpRequest, payload: ChatSchema):
-    mensagem = payload.mensagem
-    stream = payload.stream
+def _obter_mensagem_pai(
+    conversa: Conversa,
+    payload: ChatSchema,
+) -> Mensagem | None:
+    id_mensagem_pai = payload.id_mensagem_pai
+    if payload.id_mensagem_editada is not None:
+        mensagem_editada = get_object_or_404(
+            Mensagem.objects.only('id', 'mensagem_pai_id'),
+            id=payload.id_mensagem_editada,
+            conversa_id=conversa.id,
+            tipo=Mensagem.OpcoesTipo.USUARIO,
+        )
+        id_mensagem_pai = mensagem_editada.mensagem_pai_id
 
-    if not mensagem:
-        return 400, {'resposta': 'Mensagem vazia'}
+    if id_mensagem_pai is None:
+        return None
 
+    return get_object_or_404(
+        Mensagem.objects.only('id'),
+        id=id_mensagem_pai,
+        conversa_id=conversa.id,
+        tipo=Mensagem.OpcoesTipo.ASSISTENTE,
+    )
+
+
+def _obter_historico(
+    conversa_id: int,
+    id_mensagem_pai: int | None,
+):
     def mensagens_cte(cte: CTE):
         values = ('id', 'mensagem_pai_id', 'conteudo', 'criado_em')
         return (
             Mensagem.objects.filter(
-                conversa_id=payload.id_conversa,
-                id=payload.id_mensagem_pai,
+                conversa_id=conversa_id,
+                id=id_mensagem_pai,
             )
             .values(*values)
             .union(
@@ -41,9 +68,19 @@ def chat_endpoint(request: HttpRequest, payload: ChatSchema):
         )
 
     cte = CTE.recursive(mensagens_cte)
-    mensagens = with_cte(
-        cte, select=cte.join(Mensagem, id=cte.col.id).order_by('criado_em')
+    return with_cte(
+        cte,
+        select=cte.join(Mensagem, id=cte.col.id).order_by('criado_em'),
     )
+
+
+@chat_router.post('/chat')
+def chat_endpoint(request: HttpRequest, payload: ChatSchema):
+    mensagem = payload.mensagem.strip()
+    stream = payload.stream
+
+    if not mensagem:
+        return 400, {'resposta': 'Mensagem vazia'}
 
     # Criar objetos no banco de forma atômica
     with transaction.atomic():
@@ -65,16 +102,7 @@ def chat_endpoint(request: HttpRequest, payload: ChatSchema):
                 else mensagem,
             )
 
-        mensagem_pai = None
-        if payload.id_mensagem_pai:
-            mensagem_pai = (
-                Mensagem.objects.filter(
-                    id=payload.id_mensagem_pai,
-                    conversa_id=conversa.id,
-                )
-                .only('id')
-                .first()
-            )
+        mensagem_pai = _obter_mensagem_pai(conversa, payload)
 
         mensagem_pergunta = Mensagem.objects.create(
             conversa_id=conversa.id,
@@ -90,16 +118,27 @@ def chat_endpoint(request: HttpRequest, payload: ChatSchema):
             conteudo='',
         )
 
+    mensagens = _obter_historico(
+        conversa.id,
+        mensagem_pai.id if mensagem_pai else None,
+    )
+
     base_response = {
         'id_conversa': conversa.id,
         'id_mensagem_pergunta': mensagem_pergunta.id,
         'id_mensagem_resposta': mensagem_resposta.id,
     }
 
-    resposta = Rag.run(mensagem, mensagens)
+    resposta = agent_workflow.run(mensagem, mensagens)
 
     if not stream:
-        resposta_completa = ''.join(resposta)
+        try:
+            resposta_completa = ''.join(resposta)
+        except AI_ERRORS:
+            Mensagem.objects.filter(id=mensagem_resposta.id).update(
+                conteudo=AI_ERROR_MESSAGE
+            )
+            return 503, base_response | {'resposta': AI_ERROR_MESSAGE}
         Mensagem.objects.filter(id=mensagem_resposta.id).update(
             conteudo=resposta_completa
         )
@@ -112,10 +151,8 @@ def chat_endpoint(request: HttpRequest, payload: ChatSchema):
             for chunk_resposta in resposta:
                 chunks.append(chunk_resposta)
                 yield chunk_resposta
-        except APIConnectionError:
-            chunk_resposta = (
-                '\n\nUm erro inesperado ocorreu durante a gereção da resposta.'
-            )
+        except AI_ERRORS:
+            chunk_resposta = f'\n\n{AI_ERROR_MESSAGE}'
             chunks.append(chunk_resposta)
             yield chunk_resposta
 

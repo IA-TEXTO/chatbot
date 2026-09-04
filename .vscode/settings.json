@@ -21,4 +21,5 @@
             "depth": 20
         },
     ],
+    "ROS2.distro": "jazzy",
 }

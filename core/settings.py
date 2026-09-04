@@ -4,7 +4,6 @@ import sys
 from pathlib import Path
 
 import environ
-from inertia.settings import settings as inertia_settings
 
 from core.utils import CustomJsonEncoder
 
@@ -41,6 +40,7 @@ INSTALLED_APPS = [
     'django.contrib.contenttypes',
     'django.contrib.sessions',
     'django.contrib.messages',
+    'django.contrib.postgres',
     'django.contrib.staticfiles',
     'django.contrib.sites',
     # Third party apps
@@ -174,8 +174,11 @@ DJANGO_VITE_ASSETS_PATH = BASE_DIR / 'frontend' / 'dist'
 STATICFILES_DIRS = [DJANGO_VITE_ASSETS_PATH, BASE_DIR / 'frontend' / 'static']
 
 INERTIA_LAYOUT = 'base.html'
-INERTIA_SSR_URL = inertia_settings.INERTIA_SSR_URL
-INERTIA_SSR_ENABLED = True
+INERTIA_SSR_URL = env.str(
+    'INERTIA_SSR_URL',
+    default='http://localhost:13714',
+)
+INERTIA_SSR_ENABLED = env.bool('INERTIA_SSR_ENABLED', default=False)
 INERTIA_JSON_ENCODER = CustomJsonEncoder
 
 # Default primary key field type
@@ -193,6 +196,10 @@ def immutable_file_test(path, url):
 WHITENOISE_IMMUTABLE_FILE_TEST = immutable_file_test
 
 OPENAI_API_KEY = env.str('OPENAI_API_KEY', default='')
+INTEGRACAR_CHAT_MODEL = env.str(
+    'INTEGRACAR_CHAT_MODEL',
+    default='gpt-4.1-nano-2025-04-14',
+)
 
 # Upload limits
 DATA_UPLOAD_MAX_MEMORY_SIZE = 52428800  # 50MB

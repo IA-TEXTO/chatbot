@@ -1,4 +1,4 @@
-import { join, resolve } from "node:path";
+import { resolve } from "node:path";
 
 import vue from "@vitejs/plugin-vue";
 
@@ -35,14 +35,17 @@ export default defineConfig((mode) => {
 				usePolling: true,
 			},
 		},
+		optimizeDeps: {
+			entries: ["js/main.js"],
+		},
 		build: {
 			manifest: "manifest.json",
 			emptyOutDir: true,
 			outDir: resolve(OUTPUT_DIR),
 			rollupOptions: {
 				input: {
-					main: join(INPUT_DIR, "/js/main.js"),
-					css: join(INPUT_DIR, "/css/main.css"),
+					main: resolve(INPUT_DIR, "js/main.js"),
+					css: resolve(INPUT_DIR, "css/main.css"),
 				},
 			},
 		},

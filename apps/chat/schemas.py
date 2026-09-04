@@ -7,6 +7,7 @@ class ChatSchema(Schema):
     mensagem: str
     stream: bool = False
     id_mensagem_pai: int | None = None
+    id_mensagem_editada: int | None = None
     id_conversa: int | None = None
 
 

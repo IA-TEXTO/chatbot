@@ -10,17 +10,22 @@ defineOptions({ name: 'Mensagem' });
 const props = defineProps<{
     mapMensagens: MapMensagens;
     ids: number[];
+    edicaoDesabilitada: boolean;
+}>();
+
+const emit = defineEmits<{
+    editarMensagem: [idMensagem: number, conteudo: string];
 }>();
 
 const indexMensagemSelecionada = ref(props.ids.length - 1);
 
 watch(
-    () => props.ids,
-    (newIds, oldIds) => {
-        if (newIds.length > (oldIds?.length ?? 0)) {
-            indexMensagemSelecionada.value = newIds.length - 1;
-        } else if (indexMensagemSelecionada.value >= newIds.length) {
-            indexMensagemSelecionada.value = newIds.length - 1;
+    () => props.ids.length,
+    (novoTamanho, tamanhoAnterior) => {
+        if (novoTamanho > tamanhoAnterior) {
+            indexMensagemSelecionada.value = novoTamanho - 1;
+        } else if (indexMensagemSelecionada.value >= novoTamanho) {
+            indexMensagemSelecionada.value = novoTamanho - 1;
         }
     }
 );
@@ -61,10 +66,14 @@ defineExpose({
 
         <MensagemUsuario v-else-if="mensagemSelecionada.tipo === 'USUARIO'" :mensagem="mensagemSelecionada"
             :index-mensagem-selecionada="indexMensagemSelecionada" :max-mensagem-selecionada="ids.length - 1"
-            :setIndexMensagemSelecionada="setIndexMensagemSelecionada" />
+            :setIndexMensagemSelecionada="setIndexMensagemSelecionada"
+            :edicao-desabilitada="edicaoDesabilitada"
+            @editar-mensagem="(id, conteudo) => emit('editarMensagem', id, conteudo)" />
 
         <!-- Recursão -->
         <Mensagem ref="mensagemFilhaRef" v-if="mensagemSelecionada.mensagens_filhas.length"
-            :map-mensagens="mapMensagens" :ids="mensagemSelecionada.mensagens_filhas" />
+            :map-mensagens="mapMensagens" :ids="mensagemSelecionada.mensagens_filhas"
+            :edicao-desabilitada="edicaoDesabilitada"
+            @editar-mensagem="(id, conteudo) => emit('editarMensagem', id, conteudo)" />
     </template>
 </template>

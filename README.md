@@ -24,7 +24,7 @@ O Chatbot IntegraCAR é uma aplicação de inteligência artificial que utiliza 
 | **Backend** | Django 5.1, Django Ninja, Django-Q2 |
 | **Frontend** | Vue.js 3, Inertia.js, TailwindCSS, DaisyUI |
 | **Banco de Dados** | PostgreSQL (ParadeDB) com pgvector |
-| **IA/ML** | LangChain, OpenAI GPT-4.1, OpenAI Embeddings |
+| **IA/ML** | Agno, LangChain, OpenAI, OpenAI Embeddings |
 | **Build Tools** | Vite, uv (Python), npm |
 | **Containerização** | Docker, Docker Compose |
 
@@ -96,7 +96,7 @@ O Chatbot IntegraCAR é uma aplicação de inteligência artificial que utiliza 
 │                           SERVIÇOS EXTERNOS                                  │
 │  ┌─────────────────────────┐  ┌─────────────────────────────────────────┐    │
 │  │       OpenAI API        │  │              Django-Q2                  │    │
-│  │  - GPT-4.1-mini         │  │  - Processamento assíncrono             │    │
+│  │  - Modelo configurável  │  │  - Processamento assíncrono             │    │
 │  │  - text-embedding-3     │  │  - Geração de embeddings em background  │    │
 │  └─────────────────────────┘  └─────────────────────────────────────────┘    │
 └──────────────────────────────────────────────────────────────────────────────┘
@@ -177,17 +177,20 @@ api.add_router('', 'chat.api.chat_router')
 
 #### Sistema RAG (`apps/chat/rag.py`)
 
-A classe `Rag` implementa a lógica de Retrieval-Augmented Generation:
+A classe `Rag` implementa a recuperação documental. A geração e a
+orquestração ficam em `apps/chat/agents`:
 
 1. **Extração de Texto**: Processa PDFs usando `PyPDFLoader`
 2. **Chunking**: Divide documentos em chunks de ~1000 caracteres com 200 de overlap
 3. **Embedding**: Gera vetores usando `text-embedding-3-small` (1536 dimensões)
-4. **Busca Híbrida**: Combina BM25 (60%) + Busca Semântica (40%)
-5. **Geração**: Usa GPT-4.1-mini para gerar respostas baseadas no contexto
+4. **Busca Híbrida**: Combina BM25 (50%) + Busca Semântica (50%)
+5. **Filtro de domínio**: Restringe a busca a manuais, legislação ou ambos
+6. **Orquestração Agno**: Faz triagem estruturada e seleciona especialistas
+7. **Revisão**: Respostas legislativas e mistas passam por revisão de evidências
 
 ```python
 @staticmethod
-def top_k_chunks(query: str, k: int = 5) -> list[str]:
+def top_k_resultados(query: str, k: int = 5, tipos=None):
     # Busca BM25 (lexical)
     ranked_by_bm25 = ChunkDocumeto.objects.filter(conteudo__bm25=query)
     
@@ -196,9 +199,22 @@ def top_k_chunks(query: str, k: int = 5) -> list[str]:
         score=CosineDistance('embedding', embedding_query)
     )
     
-    # Fusão com pesos: BM25 (60%) + Semantic (40%)
+    # Fusão com pesos: BM25 (50%) + Semantic (50%)
     # Reciprocal Rank Fusion
 ```
+
+#### Agentes (`apps/chat/agents`)
+
+| Agente | Responsabilidade |
+|--------|------------------|
+| Triagem | Classifica em manual, legislação, mista, conversacional ou fora do escopo |
+| Manual | Explica procedimentos, documentos, campos e erros do CAR |
+| Legislação | Responde com base nos documentos normativos recuperados |
+| Revisor | Remove afirmações sem evidência e confere as citações |
+| Geral | Atende cumprimentos e informa o escopo do assistente |
+
+O histórico e as permissões continuam sob responsabilidade do Django. A
+telemetria do Agno fica desativada nos agentes.
 
 #### Views (`apps/chat/views.py`)
 
@@ -448,7 +464,7 @@ CREATE TABLE mensagem (
 │   Usuário    │     │                                      │
 └──────────────┘     │  ┌────────────┐    ┌─────────────┐   │
                      │  │   BM25     │    │  Semântica  │   │
-                     │  │   (60%)    │    │   (40%)     │   │
+                     │  │   (50%)    │    │   (50%)     │   │
                      │  └─────┬──────┘    └──────┬──────┘   │
                      │        │                  │          │
                      │        └────────┬─────────┘          │
@@ -458,13 +474,13 @@ CREATE TABLE mensagem (
                                         │
                                         ▼
                      ┌──────────────────────────────────────┐
-                     │         Top-K Chunks (10)            │
+                     │         Top-K Chunks (12)            │
                      └──────────────────┬───────────────────┘
                                         │
                                         ▼
                      ┌──────────────────────────────────────┐
-                     │           OpenAI GPT-4.1             │
-                     │      (Streaming Response)            │
+                     │     Agno: especialista + revisor      │
+                     │      (Streaming Response)             │
                      └──────────────────┬───────────────────┘
                                         │
                                         ▼
@@ -481,11 +497,10 @@ CREATE TABLE mensagem (
 | Chunk Overlap | 200 | Sobreposição entre chunks |
 | Embedding Model | text-embedding-3-small | Modelo OpenAI para embeddings |
 | Embedding Dims | 1536 | Dimensões do vetor |
-| Chat Model | gpt-4.1-mini-2025-04-14 | Modelo para geração de respostas |
-| Temperature | 0.5 | Criatividade do modelo |
-| BM25 Weight | 60% | Peso da busca lexical |
-| Semantic Weight | 40% | Peso da busca vetorial |
-| Top-K | 10 | Chunks retornados para contexto |
+| Chat Model | Configurável por ambiente | Modelo usado pelos agentes Agno |
+| BM25 Weight | 50% | Peso da busca lexical |
+| Semantic Weight | 50% | Peso da busca vetorial |
+| Top-K | 12 | Chunks retornados para contexto |
 
 ## 🐳 Infraestrutura
 
@@ -545,6 +560,7 @@ cd chatbot
 SECRET_KEY=sua-chave-secreta
 DEBUG=True
 OPENAI_API_KEY=sua-chave-openai
+INTEGRACAR_CHAT_MODEL=gpt-4.1-nano-2025-04-14
 DATABASE_URL=postgres://postgres:postgres@db:5432/chatbot-integracar
 ```
 
