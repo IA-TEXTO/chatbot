@@ -18,12 +18,14 @@ from chat.models import Documento
 from chat.rag import RetrievedChunk
 
 
-def fonte(conteudo: str, documento_id: int = 1) -> RetrievedChunk:
+def fonte(
+    conteudo: str, documento_id: int = 1, tipo: str = Documento.Tipo.MANUAL
+) -> RetrievedChunk:
     return RetrievedChunk(
         conteudo=conteudo,
         documento_id=documento_id,
         documento_nome=f'Documento {documento_id}',
-        documento_tipo=Documento.Tipo.MANUAL,
+        documento_tipo=tipo,
         score=0.1,
     )
 
@@ -34,13 +36,15 @@ class FerramentasDosAgentesTests(TestCase):
         publicadas = []
         etapas = []
 
-        def recuperar(query, k, tipos):
-            chamadas.append((query, k, tipos))
-            return [fonte('Trecho inicial'), fonte('Novo trecho', 2)]
+        def recuperar(query, k):
+            chamadas.append((query, k))
+            return [
+                fonte('Trecho inicial'),
+                fonte('Novo trecho', 2, Documento.Tipo.LEGISLACAO),
+            ]
 
         contexto = EvidenceContext(
             fontes=[fonte('Trecho inicial')],
-            tipos=(Documento.Tipo.MANUAL,),
             retriever=recuperar,
             on_sources=publicadas.append,
             on_progress=etapas.append,
@@ -56,9 +60,10 @@ class FerramentasDosAgentesTests(TestCase):
         terceira = buscar_fontes('Mais fontes', run_context=run)
 
         assert primeira['fontes_novas'][0]['numero'] == 2
+        assert primeira['fontes_novas'][0]['tipo'] == Documento.Tipo.LEGISLACAO
         assert segunda['fontes_novas'] == []
         assert 'erro' in terceira
-        assert chamadas[0] == ('APP', 6, (Documento.Tipo.MANUAL,))
+        assert chamadas[0] == ('APP', 6)
         assert [item['numero'] for item in publicadas[-1]] == [1, 2]
         assert consultar_trecho(2, run_context=run)['trecho'] == 'Novo trecho'
         assert len(etapas) == 4
@@ -94,7 +99,6 @@ class FerramentasDosAgentesTests(TestCase):
         ]
         contexto = EvidenceContext(
             fontes=[fonte('Trecho inicial')],
-            tipos=(Documento.Tipo.MANUAL,),
             retriever=lambda *_: [],
         )
 

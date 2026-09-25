@@ -232,13 +232,10 @@ class Rag:
     def top_k_resultados(
         query: str,
         k: int = 5,
-        tipos: Iterable[str] | None = None,
     ) -> list[RetrievedChunk]:
         embedding_query = Rag.embedding.embed_query(query)
 
         filtros = {'documento__status': StatusDocumento.PROCESSADO}
-        if tipos:
-            filtros['documento__tipo__in'] = tuple(tipos)
 
         query_bm25 = json.dumps(
             {'match': {'value': normalize(query)}},
@@ -316,9 +313,8 @@ class Rag:
     def top_k_chunks(
         query: str,
         k: int = 5,
-        tipos: Iterable[str] | None = None,
     ) -> list[str]:
         return [
             resultado.conteudo
-            for resultado in Rag.top_k_resultados(query, k=k, tipos=tipos)
+            for resultado in Rag.top_k_resultados(query, k=k)
         ]

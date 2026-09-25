@@ -184,13 +184,13 @@ orquestração ficam em `apps/chat/agents`:
 2. **Chunking**: Divide documentos em chunks de ~1000 caracteres com 200 de overlap
 3. **Embedding**: Gera vetores usando `text-embedding-3-small` (1536 dimensões)
 4. **Busca Híbrida**: Combina BM25 (50%) + Busca Semântica (50%)
-5. **Filtro de domínio**: Restringe a busca a manuais, legislação ou ambos
+5. **Busca no acervo**: Considera todos os documentos processados, sem filtrar por tipo
 6. **Orquestração Agno**: Faz triagem estruturada e seleciona especialistas
 7. **Revisão**: Respostas legislativas e mistas passam por revisão de evidências
 
 ```python
 @staticmethod
-def top_k_resultados(query: str, k: int = 5, tipos=None):
+def top_k_resultados(query: str, k: int = 5):
     # Busca BM25 (lexical)
     ranked_by_bm25 = ChunkDocumeto.objects.filter(conteudo__bm25=query)
     

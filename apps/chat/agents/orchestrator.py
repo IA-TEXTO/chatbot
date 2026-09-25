@@ -9,7 +9,7 @@ from chat.agents.contracts import Route, TriageDecision
 from chat.agents.factory import build_agents
 from chat.agents.tools import EvidenceContext
 from chat.agents.web import formatar_resposta_web
-from chat.models import Documento, Mensagem
+from chat.models import Mensagem
 from chat.rag import Rag, RetrievedChunk
 
 logger = logging.getLogger(__name__)
@@ -19,7 +19,7 @@ class AgentProtocol(Protocol):
     def run(self, query: str, **kwargs: Any) -> Any: ...
 
 
-Retriever = Callable[[str, int, Iterable[str] | None], list[RetrievedChunk]]
+Retriever = Callable[[str, int], list[RetrievedChunk]]
 
 
 class IntegraCARAgentWorkflow:
@@ -68,11 +68,9 @@ class IntegraCARAgentWorkflow:
             return
 
         progresso('Buscando fontes nos documentos...')
-        tipos = self._document_types(decision.route)
-        fontes = self.retriever(decision.rewritten_query, 12, tipos)
+        fontes = self.retriever(decision.rewritten_query, 12)
         evidencias = EvidenceContext(
             fontes=list(fontes),
-            tipos=tipos,
             retriever=self.retriever,
             on_sources=on_sources,
             on_progress=on_progress,
@@ -258,14 +256,6 @@ class IntegraCARAgentWorkflow:
     @staticmethod
     def _pedido_web_explicito(query: str) -> bool:
         return bool(re.search(r'\b(internet|web|online)\b', query, re.I))
-
-    @staticmethod
-    def _document_types(route: Route) -> tuple[str, ...]:
-        if route == Route.MANUAL:
-            return (Documento.Tipo.MANUAL,)
-        if route == Route.LEGISLACAO:
-            return (Documento.Tipo.LEGISLACAO,)
-        return (Documento.Tipo.MANUAL, Documento.Tipo.LEGISLACAO)
 
     @staticmethod
     def _format_sources(fontes: list[RetrievedChunk]) -> str:

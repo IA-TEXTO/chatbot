@@ -10,7 +10,7 @@ from typing import Callable
 from agno.run import RunContext
 from django.db.models import Q
 
-from chat.models import Documento, RespostaCanonica
+from chat.models import RespostaCanonica
 from chat.rag import RetrievedChunk, normalize
 
 logger = logging.getLogger(__name__)
@@ -26,7 +26,6 @@ class EvidenceContext:
     """Mantém fontes e limites isolados por pergunta, mesmo com agentes globais."""
 
     fontes: list[RetrievedChunk]
-    tipos: tuple[str, ...]
     retriever: Callable
     on_sources: Callable[[list[dict]], None] | None = None
     on_progress: Callable[[str], None] | None = None
@@ -51,28 +50,19 @@ class EvidenceContext:
                 for indice, fonte in enumerate(self.fontes, start=1)
             ])
 
-    def buscar(self, pergunta: str, tipo: str = 'ambos') -> dict:
+    def buscar(self, pergunta: str) -> dict:
         pergunta = pergunta.strip()[:300]
         if not pergunta:
             return {'erro': 'Informe o assunto da busca.'}
         if self.buscas_adicionais >= MAX_BUSCAS_ADICIONAIS:
             return {'erro': 'Limite de buscas adicionais atingido.'}
-        if tipo not in {
-            'ambos',
-            Documento.Tipo.MANUAL,
-            Documento.Tipo.LEGISLACAO,
-        }:
-            return {'erro': 'Tipo inválido. Use ambos, manual ou legislacao.'}
-        tipos = self.tipos if tipo == 'ambos' else (tipo,)
-        if any(item not in self.tipos for item in tipos):
-            return {'erro': 'Esse tipo de documento não está nesta rota.'}
         self.buscas_adicionais += 1
         if self.on_progress:
             self.on_progress(
                 'Fazendo uma busca complementar nos documentos...'
             )
         novos = []
-        for fonte in self.retriever(pergunta, 6, tipos):
+        for fonte in self.retriever(pergunta, 6):
             chave = (fonte.documento_id, fonte.conteudo)
             if chave not in self._indices and len(self.fontes) < MAX_FONTES:
                 self._indices.add(chave)
@@ -152,16 +142,13 @@ def _contexto(run_context: RunContext) -> EvidenceContext:
     return contexto
 
 
-def buscar_fontes(
-    pergunta: str, tipo: str = 'ambos', *, run_context: RunContext
-) -> dict:
+def buscar_fontes(pergunta: str, *, run_context: RunContext) -> dict:
     """Busque até seis trechos adicionais quando as fontes iniciais não bastarem.
 
     Args:
         pergunta: Busca curta e específica sobre o CAR.
-        tipo: ambos, manual ou legislacao, conforme a rota permitida.
     """
-    return _contexto(run_context).buscar(pergunta, tipo)
+    return _contexto(run_context).buscar(pergunta)
 
 
 def consultar_trecho(numero: int, *, run_context: RunContext) -> dict:

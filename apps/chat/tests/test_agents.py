@@ -33,8 +33,8 @@ class FakeRetriever:
         self.results = results or []
         self.calls = []
 
-    def __call__(self, query, k, tipos):
-        self.calls.append({'query': query, 'k': k, 'tipos': tipos})
+    def __call__(self, query, k):
+        self.calls.append({'query': query, 'k': k})
         return self.results
 
 
@@ -59,7 +59,9 @@ def make_source(document_type=Documento.Tipo.MANUAL):
 
 
 class IntegraCARAgentWorkflowTests(TestCase):
-    def test_manual_route_filters_retrieval_and_streams_specialist(self):
+    def test_manual_route_searches_all_document_types_and_streams_specialist(
+        self,
+    ):
         decision = TriageDecision(
             route=Route.MANUAL,
             confidence=0.95,
@@ -67,7 +69,7 @@ class IntegraCARAgentWorkflowTests(TestCase):
             rationale='Pergunta de procedimento.',
         )
         agents = make_agents(decision)
-        retriever = FakeRetriever([make_source()])
+        retriever = FakeRetriever([make_source(Documento.Tipo.LEGISLACAO)])
         workflow = IntegraCARAgentWorkflow(
             agents=agents,
             retriever=retriever,
@@ -76,7 +78,10 @@ class IntegraCARAgentWorkflowTests(TestCase):
         response = ''.join(workflow.run('Como preencher?', []))
 
         assert response == 'Siga o procedimento [Fonte 1].'
-        assert retriever.calls[0]['tipos'] == (Documento.Tipo.MANUAL,)
+        assert retriever.calls == [
+            {'query': 'preencher cadastro ambiental rural', 'k': 12}
+        ]
+        assert 'Tipo: legislacao' in agents['manual'].calls[0]['query']
         assert '[Fonte 1]' in agents['manual'].calls[0]['query']
         assert not agents['review'].calls
 
@@ -94,7 +99,9 @@ class IntegraCARAgentWorkflowTests(TestCase):
         )
         received = []
 
-        ''.join(workflow.run('Quais documentos?', [], on_sources=received.extend))
+        ''.join(
+            workflow.run('Quais documentos?', [], on_sources=received.extend)
+        )
 
         assert [source['numero'] for source in received] == [1, 2]
         assert received[0]['nome'] == 'Manual do CAR'
@@ -118,7 +125,9 @@ class IntegraCARAgentWorkflowTests(TestCase):
         response = ''.join(workflow.run('Qual é a norma?', []))
 
         assert response == 'Resposta revisada [Fonte 1].'
-        assert retriever.calls[0]['tipos'] == (Documento.Tipo.LEGISLACAO,)
+        assert retriever.calls == [
+            {'query': 'legislação reserva legal CAR', 'k': 12}
+        ]
         assert (
             'Parecer normativo [Fonte 1].'
             in agents['review'].calls[0]['query']
@@ -146,10 +155,9 @@ class IntegraCARAgentWorkflowTests(TestCase):
         assert response == 'Resposta revisada [Fonte 1].'
         assert agents['manual'].calls
         assert agents['legal'].calls
-        assert retriever.calls[0]['tipos'] == (
-            Documento.Tipo.MANUAL,
-            Documento.Tipo.LEGISLACAO,
-        )
+        assert retriever.calls == [
+            {'query': 'procedimento e norma para APP', 'k': 12}
+        ]
 
     def test_clarification_stops_before_retrieval(self):
         decision = TriageDecision(
