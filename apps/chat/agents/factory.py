@@ -1,8 +1,8 @@
 from agno.agent import Agent
-from agno.models.openai import OpenAIResponses
 from django.conf import settings
 
 from chat.agents.contracts import TriageDecision
+from chat.agents.models import IntegraCAROpenAIResponses
 from chat.agents.prompts import (
     GENERAL_INSTRUCTIONS,
     LEGAL_INSTRUCTIONS,
@@ -19,8 +19,8 @@ from chat.agents.tools import (
 )
 
 
-def _model() -> OpenAIResponses:
-    return OpenAIResponses(
+def _model() -> IntegraCAROpenAIResponses:
+    return IntegraCAROpenAIResponses(
         id=settings.INTEGRACAR_CHAT_MODEL,
         api_key=settings.OPENAI_API_KEY,
         timeout=60,
