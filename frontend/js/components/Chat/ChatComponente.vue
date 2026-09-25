@@ -4,10 +4,19 @@ import { router, usePage } from '@inertiajs/vue3';
 import Mensagem from './Mensagem.vue';
 import { Usuario } from '@/types/index';
 
+export type TFonte = {
+    numero: number;
+    documento_id: number;
+    nome: string;
+    tipo: string;
+    trecho: string;
+}
+
 export type TMensagem = {
     id: number;
     tipo: 'USUARIO' | 'ASSISTENTE';
     conteudo: string;
+    fontes: TFonte[];
     mensagem_pai: number | null;
     mensagens_filhas: number[];
     curtido: boolean | null;
@@ -178,6 +187,7 @@ async function criarRamificacao(
         mensagem_pai: idMensagemPai,
         mensagens_filhas: [],
         curtido: null,
+        fontes: [],
     };
 
     if (idMensagemPai !== null) {
@@ -193,6 +203,7 @@ async function criarRamificacao(
         mensagem_pai: mensagemUsuario.id,
         mensagens_filhas: [],
         curtido: null,
+        fontes: [],
     };
 
     mapMensagens.value[mensagemUsuario.id].mensagens_filhas.push(botMessage.id);
@@ -233,32 +244,30 @@ async function criarRamificacao(
             const { value, done } = await reader.read();
             buffer += decoder.decode(value, { stream: !done });
 
-            if (!cabecalhoProcessado) {
-                const fimCabecalho = buffer.indexOf('\n');
-                if (fimCabecalho === -1 && !done) continue;
-                if (fimCabecalho === -1) {
-                    throw new Error('Metadados da resposta não recebidos.');
+            let fimLinha = buffer.indexOf('\n');
+            while (fimLinha !== -1) {
+                const linha = buffer.slice(0, fimLinha);
+                buffer = buffer.slice(fimLinha + 1);
+                if (linha) {
+                    const evento = JSON.parse(linha);
+                    if (!cabecalhoProcessado) {
+                        aplicarIdsPersistidos(evento as chatResponse, mensagemUsuario, botMessage);
+                        cabecalhoProcessado = true;
+                    } else if (evento.tipo === 'trecho') {
+                        mapMensagens.value[botMessage.id].conteudo += evento.conteudo;
+                        await nextTick();
+                        scrollParaUltimaMensagem();
+                    } else if (evento.tipo === 'fontes') {
+                        mapMensagens.value[botMessage.id].fontes = evento.fontes;
+                    }
                 }
-
-                const dados: chatResponse = JSON.parse(
-                    buffer.slice(0, fimCabecalho),
-                );
-                aplicarIdsPersistidos(dados, mensagemUsuario, botMessage);
-                cabecalhoProcessado = true;
-                buffer = buffer.slice(fimCabecalho + 1);
+                fimLinha = buffer.indexOf('\n');
             }
-
-            if (buffer) {
-                const mensagemBotReativa = mapMensagens.value[botMessage.id];
-                if (mensagemBotReativa) {
-                    mensagemBotReativa.conteudo += buffer;
-                }
-                buffer = '';
-                await nextTick();
-                scrollParaUltimaMensagem();
+            if (done) {
+                if (!cabecalhoProcessado) throw new Error('Metadados da resposta não recebidos.');
+                if (buffer.trim()) throw new Error('Resposta em streaming incompleta.');
+                break;
             }
-
-            if (done) break;
         }
     } catch (error) {
         const mensagemBotReativa = mapMensagens.value[botMessage.id];

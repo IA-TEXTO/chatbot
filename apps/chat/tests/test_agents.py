@@ -80,6 +80,27 @@ class IntegraCARAgentWorkflowTests(TestCase):
         assert '[Fonte 1]' in agents['manual'].calls[0]['query']
         assert not agents['review'].calls
 
+    def test_sources_callback_preserves_citation_numbers_and_excerpts(self):
+        decision = TriageDecision(
+            route=Route.MANUAL,
+            confidence=0.95,
+            rewritten_query='documentos CAR',
+            rationale='Pergunta de procedimento.',
+        )
+        sources = [make_source(), make_source(Documento.Tipo.LEGISLACAO)]
+        workflow = IntegraCARAgentWorkflow(
+            agents=make_agents(decision),
+            retriever=FakeRetriever(sources),
+        )
+        received = []
+
+        ''.join(workflow.run('Quais documentos?', [], on_sources=received.extend))
+
+        assert [source['numero'] for source in received] == [1, 2]
+        assert received[0]['nome'] == 'Manual do CAR'
+        assert received[1]['tipo'] == Documento.Tipo.LEGISLACAO
+        assert received[0]['trecho'] == 'Trecho documental recuperado.'
+
     def test_legal_route_is_reviewed_before_streaming(self):
         decision = TriageDecision(
             route=Route.LEGISLACAO,

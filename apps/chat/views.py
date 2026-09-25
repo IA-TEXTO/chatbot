@@ -22,6 +22,7 @@ def montar_arvore_mensagens(
         mensagem.id: {
             'id': mensagem.id,
             'conteudo': mensagem.conteudo,
+            'fontes': getattr(mensagem, 'fontes', []),
             'tipo': mensagem.tipo,
             'mensagem_pai': mensagem.mensagem_pai_id,
             'mensagens_filhas': [],

@@ -2,10 +2,11 @@ import json
 
 from agno.exceptions import AgnoError
 from django.db import transaction
-from django.http import HttpRequest, StreamingHttpResponse
+from django.http import FileResponse, HttpRequest, StreamingHttpResponse
 from django.shortcuts import get_object_or_404
 from django_cte import CTE, with_cte
 from ninja import Router
+from ninja.errors import HttpError
 from openai import OpenAIError
 
 from chat.agents import IntegraCARAgentWorkflow
@@ -129,20 +130,29 @@ def chat_endpoint(request: HttpRequest, payload: ChatSchema):
         'id_mensagem_resposta': mensagem_resposta.id,
     }
 
-    resposta = agent_workflow.run(mensagem, mensagens)
+    fontes = []
+
+    def registrar_fontes(fontes_recuperadas):
+        fontes[:] = fontes_recuperadas
+
+    resposta = agent_workflow.run(
+        mensagem, mensagens, on_sources=registrar_fontes
+    )
 
     if not stream:
         try:
             resposta_completa = ''.join(resposta)
         except AI_ERRORS:
             Mensagem.objects.filter(id=mensagem_resposta.id).update(
-                conteudo=AI_ERROR_MESSAGE
+                conteudo=AI_ERROR_MESSAGE, fontes=[]
             )
             return 503, base_response | {'resposta': AI_ERROR_MESSAGE}
         Mensagem.objects.filter(id=mensagem_resposta.id).update(
-            conteudo=resposta_completa
+            conteudo=resposta_completa, fontes=fontes
         )
-        return 200, base_response | {'resposta': resposta_completa}
+        return 200, base_response | {
+            'resposta': resposta_completa, 'fontes': fontes
+        }
 
     def resposta_streaming():
         yield json.dumps(base_response) + '\n'
@@ -150,19 +160,25 @@ def chat_endpoint(request: HttpRequest, payload: ChatSchema):
         try:
             for chunk_resposta in resposta:
                 chunks.append(chunk_resposta)
-                yield chunk_resposta
+                yield json.dumps(
+                    {'tipo': 'trecho', 'conteudo': chunk_resposta}
+                ) + '\n'
         except AI_ERRORS:
             chunk_resposta = f'\n\n{AI_ERROR_MESSAGE}'
+            fontes.clear()
             chunks.append(chunk_resposta)
-            yield chunk_resposta
+            yield json.dumps(
+                {'tipo': 'trecho', 'conteudo': chunk_resposta}
+            ) + '\n'
 
         Mensagem.objects.filter(id=mensagem_resposta.id).update(
-            conteudo=''.join(chunks)
+            conteudo=''.join(chunks), fontes=fontes
         )
+        yield json.dumps({'tipo': 'fontes', 'fontes': fontes}) + '\n'
 
     return StreamingHttpResponse(
         resposta_streaming(),
-        content_type='text/plain; charset=utf-8',
+        content_type='application/x-ndjson; charset=utf-8',
     )
 
 
@@ -197,3 +213,25 @@ def curtir_mensagem(
     mensagem.curtido = payload.curtido
     mensagem.save(update_fields=['curtido'])
     return {'curtido': mensagem.curtido}
+
+
+@chat_router.get('/mensagens/{id_mensagem}/documentos/{id_documento}/arquivo')
+def arquivo_fonte(request: HttpRequest, id_mensagem: int, id_documento: int):
+    if not request.user.is_authenticated:
+        raise HttpError(403, 'Entre na sua conta para abrir o PDF.')
+
+    mensagem = get_object_or_404(
+        Mensagem, id=id_mensagem, tipo=Mensagem.OpcoesTipo.ASSISTENTE,
+        conversa__usuario=request.user,
+    )
+    documentos_citados = [
+        fonte.get('documento_id') for fonte in mensagem.fontes
+    ]
+    documento = get_object_or_404(
+        Documento, id=id_documento, id__in=documentos_citados
+    )
+    return FileResponse(
+        documento.arquivo.open('rb'),
+        content_type='application/pdf',
+        filename=documento.arquivo.name.rsplit('/', 1)[-1],
+    )

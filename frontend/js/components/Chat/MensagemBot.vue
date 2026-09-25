@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { TMensagem } from './ChatComponente.vue';
+import type { TMensagem } from './ChatComponente.vue';
+import { usePage } from '@inertiajs/vue3';
 import markdownit from 'markdown-it';
-import { ref, watch } from 'vue';
+import { computed, nextTick, ref, watch } from 'vue';
 
 
 const md = markdownit();
@@ -16,6 +17,45 @@ const props = defineProps<{
 
 const curtido = ref<boolean | null>(props.mensagem.curtido);
 const copiado = ref(false);
+const fontesAbertas = ref(false);
+const usuarioAutenticado = Boolean(usePage().props.user);
+
+const fontes = computed(() => props.mensagem.fontes ?? []);
+const numerosDisponiveis = computed(() => new Set(fontes.value.map(fonte => fonte.numero)));
+
+const respostaHtml = computed(() => {
+    const texto = props.mensagem.conteudo.replace(
+        /\[Fonte\s+(\d+)\]/gi,
+        (citacao, numero) => numerosDisponiveis.value.has(Number(numero))
+            ? `[Fonte ${numero}](#fonte-${props.mensagem.id}-${numero})`
+            : citacao,
+    ).replace(
+        /\(fontes?\s+\d+(?:\s*,\s*\d+)*\)/gi,
+        (citacao) => {
+            const numeros = [...citacao.matchAll(/\d+/g)].map(match => Number(match[0]));
+            if (!numeros.every(numero => numerosDisponiveis.value.has(numero))) return citacao;
+            return `(${numeros.map(numero =>
+                `[Fonte ${numero}](#fonte-${props.mensagem.id}-${numero})`
+            ).join(', ')})`;
+        },
+    );
+    return md.render(texto);
+});
+
+function aoAlternarFontes(event: Event) {
+    fontesAbertas.value = (event.target as HTMLDetailsElement).open;
+}
+
+async function abrirFonte(event: MouseEvent) {
+    const alvo = event.target as HTMLElement;
+    const link = alvo.closest('a[href^="#fonte-"]') as HTMLAnchorElement | null;
+    if (!link) return;
+    event.preventDefault();
+    fontesAbertas.value = true;
+    await nextTick();
+    document.getElementById(link.hash.slice(1))?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
 
 watch(() => props.mensagem.curtido, (novoCurtido) => {
     curtido.value = novoCurtido;
@@ -57,11 +97,33 @@ async function curtirMensagem(valor: boolean) {
 
         <div v-if="mensagem.conteudo"
             class="markdown w-full rounded-2xl bg-base-100"
-            v-html="md.render(mensagem.conteudo)"></div>
+            v-html="respostaHtml" @click="abrirFonte"></div>
         <div v-else class="inline-grid *:[grid-area:1/1] pl-1" aria-label="Assistente digitando resposta">
             <div class="status status-neutral animate-ping status-lg"></div>
             <div class="status status-neutral status-lg"></div>
         </div>
+
+        <details v-if="fontes.length" :open="fontesAbertas" @toggle="aoAlternarFontes"
+            class="w-full rounded-xl border border-base-content/15 bg-base-200/50 px-3 py-2">
+            <summary class="cursor-pointer text-sm font-semibold">
+                Fontes consultadas ({{ fontes.length }})
+            </summary>
+            <ol class="mt-3 space-y-3">
+                <li v-for="fonte in fontes" :id="`fonte-${mensagem.id}-${fonte.numero}`"
+                    :key="fonte.numero" class="rounded-lg bg-base-100 p-3 text-sm scroll-mt-4">
+                    <div class="font-semibold">Fonte {{ fonte.numero }} · {{ fonte.nome }}</div>
+                    <div class="mt-0.5 text-xs opacity-70">
+                        {{ fonte.tipo === 'legislacao' ? 'Legislação' : 'Manual' }}
+                    </div>
+                    <p class="mt-2 whitespace-pre-wrap wrap-break-word">{{ fonte.trecho }}</p>
+                    <a v-if="usuarioAutenticado" class="link link-primary mt-2 inline-block"
+                        :href="`/api/mensagens/${mensagem.id}/documentos/${fonte.documento_id}/arquivo`"
+                        target="_blank" rel="noopener noreferrer">
+                        Abrir PDF <span class="sr-only">de {{ fonte.nome }} em nova aba</span>
+                    </a>
+                </li>
+            </ol>
+        </details>
 
         <div class="flex flex-wrap items-center gap-1">
             <div class="flex items-center gap-0.5" v-if="maxMensagemSelecionada > 0" aria-label="Navegação entre respostas">

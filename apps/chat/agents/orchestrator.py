@@ -35,6 +35,7 @@ class IntegraCARAgentWorkflow:
         self,
         query: str,
         mensagens: Iterable[Mensagem],
+        on_sources: Callable[[list[dict]], None] | None = None,
     ) -> Generator[str, None, None]:
         historico = self._format_history(mensagens)
         decision = self._triage(query, historico)
@@ -50,6 +51,17 @@ class IntegraCARAgentWorkflow:
 
         tipos = self._document_types(decision.route)
         fontes = self.retriever(decision.rewritten_query, 12, tipos)
+        if on_sources is not None:
+            on_sources([
+                {
+                    'numero': indice,
+                    'documento_id': fonte.documento_id,
+                    'nome': fonte.documento_nome,
+                    'tipo': fonte.documento_tipo,
+                    'trecho': fonte.conteudo,
+                }
+                for indice, fonte in enumerate(fontes, start=1)
+            ])
         if not fontes:
             yield (
                 'Não encontrei informações suficientes nos documentos '

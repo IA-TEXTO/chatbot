@@ -129,6 +129,7 @@ class Mensagem(models.Model):
     )
 
     conteudo = models.TextField(blank=True, default='')
+    fontes = models.JSONField(default=list, blank=True)
 
     tipo = models.CharField(
         max_length=20,
