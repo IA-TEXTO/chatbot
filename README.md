@@ -213,8 +213,21 @@ def top_k_resultados(query: str, k: int = 5, tipos=None):
 | Revisor | Remove afirmações sem evidência e confere as citações |
 | Geral | Atende cumprimentos e informa o escopo do assistente |
 
+Os especialistas podem consultar orientações canônicas, buscar até duas vezes mais
+nos PDFs e examinar um trecho pelo número da fonte. Essas ferramentas são apenas
+de leitura; os trechos adicionais mantêm números estáveis na resposta. Cada
+especialista tem limite de quatro chamadas de ferramenta por execução. As
+citações inexistentes são sinalizadas na resposta final, mas essa validação
+numérica não prova que o trecho sustente a afirmação.
+
 O histórico e as permissões continuam sob responsabilidade do Django. A
-telemetria do Agno fica desativada nos agentes.
+telemetria do Agno fica desativada nos agentes. O streaming envia eventos de
+`progresso`, `trecho`, `resposta_final` e `fontes`, com atualização periódica de
+progresso durante etapas demoradas. Perguntas que exigem informação atual
+ou pesquisa online são enviadas a um agente com a ferramenta nativa
+`web_search` da OpenAI via Agno. As respostas web incluem links clicáveis
+nas citações; sem links verificáveis, o assistente informa que não
+conseguiu confirmar a resposta. Essa rota não usa os PDFs locais.
 
 #### Views (`apps/chat/views.py`)
 
@@ -560,7 +573,7 @@ cd chatbot
 SECRET_KEY=sua-chave-secreta
 DEBUG=True
 OPENAI_API_KEY=sua-chave-openai
-INTEGRACAR_CHAT_MODEL=gpt-4.1-nano-2025-04-14
+INTEGRACAR_CHAT_MODEL=gpt-6-luna
 DATABASE_URL=postgres://postgres:postgres@db:5432/chatbot-integracar
 ```
 

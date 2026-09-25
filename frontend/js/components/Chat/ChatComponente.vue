@@ -17,6 +17,7 @@ export type TMensagem = {
     tipo: 'USUARIO' | 'ASSISTENTE';
     conteudo: string;
     fontes: TFonte[];
+    progresso?: string;
     mensagem_pai: number | null;
     mensagens_filhas: number[];
     curtido: boolean | null;
@@ -204,6 +205,7 @@ async function criarRamificacao(
         mensagens_filhas: [],
         curtido: null,
         fontes: [],
+        progresso: 'Enviando pergunta...',
     };
 
     mapMensagens.value[mensagemUsuario.id].mensagens_filhas.push(botMessage.id);
@@ -253,8 +255,14 @@ async function criarRamificacao(
                     if (!cabecalhoProcessado) {
                         aplicarIdsPersistidos(evento as chatResponse, mensagemUsuario, botMessage);
                         cabecalhoProcessado = true;
+                    } else if (evento.tipo === 'progresso') {
+                        mapMensagens.value[botMessage.id].progresso = evento.conteudo;
+                    } else if (evento.tipo === 'resposta_final') {
+                        mapMensagens.value[botMessage.id].conteudo = evento.conteudo;
+                        mapMensagens.value[botMessage.id].progresso = undefined;
                     } else if (evento.tipo === 'trecho') {
                         mapMensagens.value[botMessage.id].conteudo += evento.conteudo;
+                        mapMensagens.value[botMessage.id].progresso = 'Escrevendo resposta...';
                         await nextTick();
                         scrollParaUltimaMensagem();
                     } else if (evento.tipo === 'fontes') {
@@ -273,10 +281,12 @@ async function criarRamificacao(
         const mensagemBotReativa = mapMensagens.value[botMessage.id];
         if (mensagemBotReativa) {
             mensagemBotReativa.conteudo = 'Ocorreu um erro ao enviar sua mensagem. Tente novamente.';
+            mensagemBotReativa.progresso = undefined;
         }
         erroEnvio.value = 'Não foi possível enviar sua pergunta agora.';
         console.error(error);
     } finally {
+        mapMensagens.value[botMessage.id].progresso = undefined;
         enviandoMensagem.value = false;
         await nextTick();
         focarInputMensagem();

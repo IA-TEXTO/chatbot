@@ -228,9 +228,15 @@ async function curtirMensagem(valor: boolean) {
             class="markdown w-full rounded-2xl bg-base-100"
             v-html="respostaHtml" @mouseover="aoPassarMouse" @mouseout="aoSairMouse"
             @focusin="aoFocar" @focusout="aoDesfocar" @click="aoClicarCitacao"></div>
-        <div v-else class="inline-grid *:[grid-area:1/1] pl-1" aria-label="Assistente digitando resposta">
+        <div v-else-if="!mensagem.progresso" class="inline-grid *:[grid-area:1/1] pl-1" aria-label="Assistente digitando resposta">
             <div class="status status-neutral animate-ping status-lg"></div>
             <div class="status status-neutral status-lg"></div>
+        </div>
+
+        <div v-if="mensagem.progresso" class="flex items-center gap-2 pl-1 text-sm opacity-70"
+            role="status" aria-live="polite">
+            <span class="loading loading-spinner loading-xs" aria-hidden="true"></span>
+            <span>{{ mensagem.progresso }}</span>
         </div>
 
         <Teleport to="body">

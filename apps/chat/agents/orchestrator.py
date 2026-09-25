@@ -1,4 +1,5 @@
 import logging
+import re
 from collections.abc import Callable, Generator, Iterable
 from typing import Any, Protocol
 
@@ -6,6 +7,8 @@ from agno.run.agent import RunContentEvent
 
 from chat.agents.contracts import Route, TriageDecision
 from chat.agents.factory import build_agents
+from chat.agents.tools import EvidenceContext
+from chat.agents.web import formatar_resposta_web
 from chat.models import Documento, Mensagem
 from chat.rag import Rag, RetrievedChunk
 
@@ -36,32 +39,52 @@ class IntegraCARAgentWorkflow:
         query: str,
         mensagens: Iterable[Mensagem],
         on_sources: Callable[[list[dict]], None] | None = None,
+        on_progress: Callable[[str], None] | None = None,
     ) -> Generator[str, None, None]:
+        def progresso(texto: str) -> None:
+            if on_progress:
+                on_progress(texto)
+
+        progresso('Analisando sua pergunta...')
         historico = self._format_history(mensagens)
         decision = self._triage(query, historico)
 
         if decision.needs_clarification and decision.clarification_question:
+            progresso('Preparando uma pergunta de esclarecimento...')
             yield decision.clarification_question
             return
 
+        if decision.needs_web or self._pedido_web_explicito(query):
+            progresso('Pesquisando na internet...')
+            result = self.agents['web'].run(
+                decision.rewritten_query, stream=False
+            )
+            progresso('Conferindo os links encontrados...')
+            resposta_web = formatar_resposta_web(
+                str(result.content or ''), getattr(result, 'citations', None)
+            )
+            yield resposta_web or (
+                'Não consegui confirmar uma resposta em páginas da internet '
+                'com links verificáveis agora. Tente novamente mais tarde.'
+            )
+            return
+
         if decision.route in {Route.CONVERSACIONAL, Route.FORA_ESCOPO}:
+            progresso('Preparando resposta...')
             prompt = self._general_prompt(query, historico)
             yield from self._stream(self.agents['general'], prompt)
             return
 
+        progresso('Buscando fontes nos documentos...')
         tipos = self._document_types(decision.route)
         fontes = self.retriever(decision.rewritten_query, 12, tipos)
-        if on_sources is not None:
-            on_sources([
-                {
-                    'numero': indice,
-                    'documento_id': fonte.documento_id,
-                    'nome': fonte.documento_nome,
-                    'tipo': fonte.documento_tipo,
-                    'trecho': fonte.conteudo,
-                }
-                for indice, fonte in enumerate(fontes, start=1)
-            ])
+        evidencias = EvidenceContext(
+            fontes=list(fontes),
+            tipos=tipos,
+            retriever=self.retriever,
+            on_sources=on_sources,
+            on_progress=on_progress,
+        )
         if not fontes:
             yield (
                 'Não encontrei informações suficientes nos documentos '
@@ -77,17 +100,40 @@ class IntegraCARAgentWorkflow:
             contexto=contexto,
         )
 
+        dependencies = {'evidence_context': evidencias}
+
         if decision.route == Route.MANUAL:
-            yield from self._stream(self.agents['manual'], prompt)
+            progresso('Elaborando orientação com base nas fontes...')
+            yield from self._stream(
+                self.agents['manual'], prompt, dependencies=dependencies
+            )
             return
 
         if decision.route == Route.LEGISLACAO:
-            parecer = self._run_text(self.agents['legal'], prompt)
-            yield from self._review(query, contexto, parecer)
+            progresso('Conferindo fundamento normativo...')
+            parecer = self._run_text(
+                self.agents['legal'], prompt, dependencies=dependencies
+            )
+            progresso('Revisando a resposta...')
+            yield from self._review(
+                query, self._format_sources(evidencias.fontes), parecer
+            )
             return
 
-        parecer_manual = self._run_text(self.agents['manual'], prompt)
-        parecer_legal = self._run_text(self.agents['legal'], prompt)
+        progresso('Conferindo o procedimento...')
+        parecer_manual = self._run_text(
+            self.agents['manual'], prompt, dependencies=dependencies
+        )
+        progresso('Conferindo fundamento normativo...')
+        parecer_legal = self._run_text(
+            self.agents['legal'],
+            self._specialist_prompt(
+                query=query,
+                historico=historico,
+                contexto=self._format_sources(evidencias.fontes),
+            ),
+            dependencies=dependencies,
+        )
         pareceres = (
             '<parecer_manual>\n'
             f'{parecer_manual}\n'
@@ -96,7 +142,10 @@ class IntegraCARAgentWorkflow:
             f'{parecer_legal}\n'
             '</parecer_legal>'
         )
-        yield from self._review(query, contexto, pareceres)
+        progresso('Revisando a resposta...')
+        yield from self._review(
+            query, self._format_sources(evidencias.fontes), pareceres
+        )
 
     def _triage(self, query: str, historico: str) -> TriageDecision:
         prompt = (
@@ -174,6 +223,10 @@ class IntegraCARAgentWorkflow:
         yield from self._stream(self.agents['review'], prompt)
 
     @staticmethod
+    def _pedido_web_explicito(query: str) -> bool:
+        return bool(re.search(r'\b(internet|web|online)\b', query, re.I))
+
+    @staticmethod
     def _document_types(route: Route) -> tuple[str, ...]:
         if route == Route.MANUAL:
             return (Documento.Tipo.MANUAL,)
@@ -236,16 +289,31 @@ class IntegraCARAgentWorkflow:
         )
 
     @staticmethod
-    def _run_text(agent: AgentProtocol, prompt: str) -> str:
-        result = agent.run(prompt, stream=False)
+    def _run_text(
+        agent: AgentProtocol, prompt: str, *, dependencies: dict | None = None
+    ) -> str:
+        result = agent.run(
+            prompt,
+            stream=False,
+            dependencies=dependencies,
+            add_dependencies_to_context=False,
+        )
         return str(result.content or '')
 
     @staticmethod
     def _stream(
         agent: AgentProtocol,
         prompt: str,
+        *,
+        dependencies: dict | None = None,
     ) -> Generator[str, None, None]:
-        events = agent.run(prompt, stream=True, stream_events=False)
+        events = agent.run(
+            prompt,
+            stream=True,
+            stream_events=False,
+            dependencies=dependencies,
+            add_dependencies_to_context=False,
+        )
         for event in events:
             if isinstance(event, RunContentEvent) and event.content:
                 yield str(event.content)

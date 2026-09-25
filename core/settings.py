@@ -198,7 +198,7 @@ WHITENOISE_IMMUTABLE_FILE_TEST = immutable_file_test
 OPENAI_API_KEY = env.str('OPENAI_API_KEY', default='')
 INTEGRACAR_CHAT_MODEL = env.str(
     'INTEGRACAR_CHAT_MODEL',
-    default='gpt-4.1-nano-2025-04-14',
+    default='gpt-6-luna',
 )
 
 # Upload limits

@@ -9,6 +9,13 @@ from chat.agents.prompts import (
     MANUAL_INSTRUCTIONS,
     REVIEW_INSTRUCTIONS,
     TRIAGE_INSTRUCTIONS,
+    WEB_INSTRUCTIONS,
+)
+from chat.agents.tools import (
+    buscar_fontes,
+    consultar_resposta_canonica,
+    consultar_trecho,
+    registrar_chamada_ferramenta,
 )
 
 
@@ -43,6 +50,13 @@ def build_agents() -> dict[str, Agent]:
             name='Especialista em procedimentos do CAR',
             model=_model(),
             instructions=MANUAL_INSTRUCTIONS,
+            tools=[
+                buscar_fontes,
+                consultar_trecho,
+                consultar_resposta_canonica,
+            ],
+            tool_call_limit=4,
+            tool_hooks=[registrar_chamada_ferramenta],
             **common,
         ),
         'legal': Agent(
@@ -50,6 +64,13 @@ def build_agents() -> dict[str, Agent]:
             name='Especialista em legislação ambiental',
             model=_model(),
             instructions=LEGAL_INSTRUCTIONS,
+            tools=[
+                buscar_fontes,
+                consultar_trecho,
+                consultar_resposta_canonica,
+            ],
+            tool_call_limit=4,
+            tool_hooks=[registrar_chamada_ferramenta],
             **common,
         ),
         'review': Agent(
@@ -57,6 +78,15 @@ def build_agents() -> dict[str, Agent]:
             name='Revisor de evidências',
             model=_model(),
             instructions=REVIEW_INSTRUCTIONS,
+            **common,
+        ),
+        'web': Agent(
+            id='integracar-web',
+            name='Pesquisa web do IntegraCAR',
+            model=_model(),
+            instructions=WEB_INSTRUCTIONS,
+            tools=[{'type': 'web_search', 'search_context_size': 'medium'}],
+            tool_choice='required',
             **common,
         ),
         'general': Agent(

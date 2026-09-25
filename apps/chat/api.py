@@ -1,7 +1,10 @@
 import json
+import logging
+from queue import Empty, Queue
+from threading import Thread
 
 from agno.exceptions import AgnoError
-from django.db import transaction
+from django.db import close_old_connections, transaction
 from django.http import FileResponse, HttpRequest, StreamingHttpResponse
 from django.shortcuts import get_object_or_404
 from django_cte import CTE, with_cte
@@ -10,6 +13,7 @@ from ninja.errors import HttpError
 from openai import OpenAIError
 
 from chat.agents import IntegraCARAgentWorkflow
+from chat.agents.tools import validar_citacoes
 from chat.models import Conversa, Documento, Mensagem
 from chat.schemas import (
     AtualizarTipoDocumentoSchema,
@@ -17,6 +21,7 @@ from chat.schemas import (
     CurtirMensagemSchema,
 )
 
+logger = logging.getLogger(__name__)
 chat_router = Router()
 agent_workflow = IntegraCARAgentWorkflow()
 AI_ERRORS = (AgnoError, OpenAIError)
@@ -135,51 +140,105 @@ def chat_endpoint(request: HttpRequest, payload: ChatSchema):
     def registrar_fontes(fontes_recuperadas):
         fontes[:] = fontes_recuperadas
 
-    resposta = agent_workflow.run(
-        mensagem, mensagens, on_sources=registrar_fontes
-    )
+    def gerar_resposta(on_progress=None):
+        return agent_workflow.run(
+            mensagem,
+            mensagens,
+            on_sources=registrar_fontes,
+            on_progress=on_progress,
+        )
 
     if not stream:
         try:
-            resposta_completa = ''.join(resposta)
+            resposta_completa = ''.join(gerar_resposta())
         except AI_ERRORS:
             Mensagem.objects.filter(id=mensagem_resposta.id).update(
                 conteudo=AI_ERROR_MESSAGE, fontes=[]
             )
             return 503, base_response | {'resposta': AI_ERROR_MESSAGE}
+        resposta_completa = validar_citacoes(resposta_completa, len(fontes))
         Mensagem.objects.filter(id=mensagem_resposta.id).update(
             conteudo=resposta_completa, fontes=fontes
         )
         return 200, base_response | {
-            'resposta': resposta_completa, 'fontes': fontes
+            'resposta': resposta_completa,
+            'fontes': fontes,
         }
 
-    def resposta_streaming():
-        yield json.dumps(base_response) + '\n'
-        chunks = []
-        try:
-            for chunk_resposta in resposta:
-                chunks.append(chunk_resposta)
-                yield json.dumps(
-                    {'tipo': 'trecho', 'conteudo': chunk_resposta}
-                ) + '\n'
-        except AI_ERRORS:
-            chunk_resposta = f'\n\n{AI_ERROR_MESSAGE}'
-            fontes.clear()
-            chunks.append(chunk_resposta)
-            yield json.dumps(
-                {'tipo': 'trecho', 'conteudo': chunk_resposta}
-            ) + '\n'
-
-        Mensagem.objects.filter(id=mensagem_resposta.id).update(
-            conteudo=''.join(chunks), fontes=fontes
-        )
-        yield json.dumps({'tipo': 'fontes', 'fontes': fontes}) + '\n'
-
     return StreamingHttpResponse(
-        resposta_streaming(),
+        _stream_resposta(
+            base_response, gerar_resposta, fontes, mensagem_resposta.id
+        ),
         content_type='application/x-ndjson; charset=utf-8',
     )
+
+
+def _executar_resposta(gerar_resposta, eventos):
+    try:
+        for texto in gerar_resposta(
+            on_progress=lambda etapa: eventos.put(('progresso', etapa))
+        ):
+            eventos.put(('trecho', texto))
+    except (AgnoError, OpenAIError):
+        logger.exception('Erro do provedor de IA ao responder.')
+        eventos.put(('erro', AI_ERROR_MESSAGE))
+    except Exception:
+        logger.exception('Erro inesperado ao responder.')
+        eventos.put(('erro', AI_ERROR_MESSAGE))
+    finally:
+        close_old_connections()
+        eventos.put(('fim', None))
+
+
+def _transmitir_eventos(eventos, partes, fontes):
+    etapa_atual = 'Analisando sua pergunta...'
+    falhou = False
+    while True:
+        try:
+            tipo, conteudo = eventos.get(timeout=8)
+        except Empty:
+            yield {'tipo': 'progresso', 'conteudo': etapa_atual}
+            continue
+        if tipo == 'fim':
+            break
+        if tipo == 'progresso':
+            etapa_atual = conteudo
+            yield {'tipo': tipo, 'conteudo': conteudo}
+        elif tipo == 'erro':
+            falhou = True
+            fontes.clear()
+            partes[:] = [conteudo]
+            yield {'tipo': 'resposta_final', 'conteudo': conteudo}
+        elif tipo == 'trecho' and not falhou:
+            etapa_atual = 'Escrevendo resposta...'
+            partes.append(conteudo)
+            yield {'tipo': tipo, 'conteudo': conteudo}
+
+
+def _stream_resposta(base_response, gerar_resposta, fontes, id_resposta):
+    yield json.dumps(base_response) + '\n'
+    eventos = Queue()
+    Thread(
+        target=_executar_resposta,
+        args=(gerar_resposta, eventos),
+        daemon=True,
+    ).start()
+    partes = []
+    for evento in _transmitir_eventos(eventos, partes, fontes):
+        yield json.dumps(evento) + '\n'
+
+    resposta_final = validar_citacoes(''.join(partes), len(fontes))
+    Mensagem.objects.filter(id=id_resposta).update(
+        conteudo=resposta_final, fontes=fontes
+    )
+    yield (
+        json.dumps({
+            'tipo': 'resposta_final',
+            'conteudo': resposta_final,
+        })
+        + '\n'
+    )
+    yield json.dumps({'tipo': 'fontes', 'fontes': fontes}) + '\n'
 
 
 @chat_router.get('/documentos/{id_documento}/status')
@@ -221,7 +280,9 @@ def arquivo_fonte(request: HttpRequest, id_mensagem: int, id_documento: int):
         raise HttpError(403, 'Entre na sua conta para abrir o PDF.')
 
     mensagem = get_object_or_404(
-        Mensagem, id=id_mensagem, tipo=Mensagem.OpcoesTipo.ASSISTENTE,
+        Mensagem,
+        id=id_mensagem,
+        tipo=Mensagem.OpcoesTipo.ASSISTENTE,
         conversa__usuario=request.user,
     )
     documentos_citados = [
