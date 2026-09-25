@@ -219,3 +219,27 @@ body,
         font-size: 0.95rem;
     }
 }
+
+/* Citações com prévia do documento */
+.markdown a.citacao-fonte {
+    display: inline-block;
+    padding: 0.05rem 0.35rem;
+    border-radius: 0.4rem;
+    background: color-mix(in oklab, var(--color-primary) 12%, transparent);
+    color: var(--color-primary);
+    font-size: 0.85em;
+    font-weight: 600;
+    line-height: 1.4;
+    text-decoration: none;
+    white-space: nowrap;
+}
+
+.markdown a.citacao-fonte:hover,
+.markdown a.citacao-fonte:focus-visible {
+    background: color-mix(in oklab, var(--color-primary) 22%, transparent);
+    text-decoration: underline;
+}
+
+.fonte-tooltip {
+    line-height: 1.45;
+}
