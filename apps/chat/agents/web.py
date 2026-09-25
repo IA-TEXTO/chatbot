@@ -21,9 +21,10 @@ def _url_segura(url: str | None) -> str | None:
     return url
 
 
-def _citacoes_inline(texto: str, citacoes) -> tuple[list, list]:
+def _citacoes_inline(texto: str, citacoes) -> tuple[list, list, bool]:
     urls = []
     insercoes = []
+    link_existente = False
     for item in citacoes.raw or []:
         if not isinstance(item, dict) or item.get('type') != 'url_citation':
             continue
@@ -35,8 +36,12 @@ def _citacoes_inline(texto: str, citacoes) -> tuple[list, list]:
             continue
         if url not in urls:
             urls.append(url)
-        insercoes.append((posicao, urls.index(url) + 1, url))
-    return urls, insercoes
+        contexto = texto[max(0, posicao - len(url) - 160) : posicao]
+        if f']({url})' in contexto or f'](<{url}>)' in contexto:
+            link_existente = True
+        else:
+            insercoes.append((posicao, urls.index(url) + 1, url))
+    return urls, insercoes, link_existente
 
 
 def formatar_resposta_web(texto: str, citacoes) -> str | None:
@@ -44,12 +49,12 @@ def formatar_resposta_web(texto: str, citacoes) -> str | None:
     if not citacoes:
         return None
 
-    urls, insercoes = _citacoes_inline(texto, citacoes)
+    urls, insercoes, link_existente = _citacoes_inline(texto, citacoes)
     for posicao, numero, url in sorted(insercoes, reverse=True):
         texto = texto[:posicao] + f' [Web {numero}](<{url}>)' + texto[posicao:]
     texto = MARCADORES_WEB.sub('', texto)
 
-    if insercoes:
+    if insercoes or link_existente:
         return texto
 
     for fonte in citacoes.urls or []:

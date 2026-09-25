@@ -140,12 +140,13 @@ def chat_endpoint(request: HttpRequest, payload: ChatSchema):
     def registrar_fontes(fontes_recuperadas):
         fontes[:] = fontes_recuperadas
 
-    def gerar_resposta(on_progress=None):
+    def gerar_resposta(on_progress=None, on_final=None):
         return agent_workflow.run(
             mensagem,
             mensagens,
             on_sources=registrar_fontes,
             on_progress=on_progress,
+            on_final=on_final,
         )
 
     if not stream:
@@ -176,7 +177,8 @@ def chat_endpoint(request: HttpRequest, payload: ChatSchema):
 def _executar_resposta(gerar_resposta, eventos):
     try:
         for texto in gerar_resposta(
-            on_progress=lambda etapa: eventos.put(('progresso', etapa))
+            on_progress=lambda etapa: eventos.put(('progresso', etapa)),
+            on_final=lambda resposta: eventos.put(('final', resposta)),
         ):
             eventos.put(('trecho', texto))
     except (AgnoError, OpenAIError):
@@ -204,6 +206,8 @@ def _transmitir_eventos(eventos, partes, fontes):
         if tipo == 'progresso':
             etapa_atual = conteudo
             yield {'tipo': tipo, 'conteudo': conteudo}
+        elif tipo == 'final' and not falhou:
+            partes[:] = [conteudo]
         elif tipo == 'erro':
             falhou = True
             fontes.clear()

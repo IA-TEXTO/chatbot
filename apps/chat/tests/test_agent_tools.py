@@ -109,7 +109,7 @@ class FerramentasDosAgentesTests(TestCase):
     ):
         fontes = [{'numero': 1, 'documento_id': 1, 'nome': 'Manual'}]
 
-        def gerar(on_progress):
+        def gerar(on_progress, on_final):
             on_progress('Buscando fontes...')
             yield 'Resposta [Fonte 2].'
 
@@ -125,3 +125,21 @@ class FerramentasDosAgentesTests(TestCase):
         assert eventos[2]['tipo'] == 'trecho'
         assert 'citação não verificada' in eventos[-2]['conteudo']
         objetos.filter.return_value.update.assert_called_once()
+
+    @patch('chat.api.Mensagem.objects')
+    def test_stream_substitui_texto_web_pela_versao_com_links(self, objetos):
+        def gerar(on_progress, on_final):
+            yield 'Resposta da web.'
+            on_final('Resposta da web. [Web 1](<https://idaf.es.gov.br>)')
+
+        linhas = list(_stream_resposta({}, gerar, [], 9))
+        eventos = [json.loads(linha) for linha in linhas]
+
+        assert eventos[1] == {'tipo': 'trecho', 'conteudo': 'Resposta da web.'}
+        assert eventos[-2]['conteudo'].endswith(
+            '[Web 1](<https://idaf.es.gov.br>)'
+        )
+        assert (
+            objetos.filter.return_value.update.call_args.kwargs['conteudo']
+            == (eventos[-2]['conteudo'])
+        )

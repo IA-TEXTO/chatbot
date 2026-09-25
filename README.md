@@ -225,8 +225,9 @@ telemetria do Agno fica desativada nos agentes. O streaming envia eventos de
 `progresso`, `trecho`, `resposta_final` e `fontes`, com atualização periódica de
 progresso durante etapas demoradas. Perguntas que exigem informação atual
 ou pesquisa online são enviadas a um agente com a ferramenta nativa
-`web_search` da OpenAI via Agno. As respostas web incluem links clicáveis
-nas citações; sem links verificáveis, o assistente informa que não
+`web_search` da OpenAI via Agno. A rota web transmite o texto à medida
+que é gerado e substitui a versão parcial pela resposta com links de
+citação ao final. Sem links verificáveis, o assistente informa que não
 conseguiu confirmar a resposta. Essa rota não usa os PDFs locais.
 
 #### Views (`apps/chat/views.py`)

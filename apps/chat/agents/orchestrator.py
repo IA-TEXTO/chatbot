@@ -3,7 +3,7 @@ import re
 from collections.abc import Callable, Generator, Iterable
 from typing import Any, Protocol
 
-from agno.run.agent import RunContentEvent
+from agno.run.agent import RunCompletedEvent, RunContentEvent
 
 from chat.agents.contracts import Route, TriageDecision
 from chat.agents.factory import build_agents
@@ -40,6 +40,7 @@ class IntegraCARAgentWorkflow:
         mensagens: Iterable[Mensagem],
         on_sources: Callable[[list[dict]], None] | None = None,
         on_progress: Callable[[str], None] | None = None,
+        on_final: Callable[[str], None] | None = None,
     ) -> Generator[str, None, None]:
         def progresso(texto: str) -> None:
             if on_progress:
@@ -55,17 +56,8 @@ class IntegraCARAgentWorkflow:
             return
 
         if decision.needs_web or self._pedido_web_explicito(query):
-            progresso('Pesquisando na internet...')
-            result = self.agents['web'].run(
-                decision.rewritten_query, stream=False
-            )
-            progresso('Conferindo os links encontrados...')
-            resposta_web = formatar_resposta_web(
-                str(result.content or ''), getattr(result, 'citations', None)
-            )
-            yield resposta_web or (
-                'Não consegui confirmar uma resposta em páginas da internet '
-                'com links verificáveis agora. Tente novamente mais tarde.'
+            yield from self._run_web(
+                decision.rewritten_query, on_progress=on_progress, on_final=on_final
             )
             return
 
@@ -146,6 +138,47 @@ class IntegraCARAgentWorkflow:
         yield from self._review(
             query, self._format_sources(evidencias.fontes), pareceres
         )
+
+    def _run_web(
+        self,
+        query: str,
+        *,
+        on_progress: Callable[[str], None] | None,
+        on_final: Callable[[str], None] | None,
+    ) -> Generator[str, None, None]:
+        if on_progress:
+            on_progress('Pesquisando na internet...')
+        partes = []
+        citacoes = None
+        eventos = self.agents['web'].run(
+            query, stream=True, stream_events=True
+        )
+        for evento in eventos:
+            if isinstance(evento, (RunContentEvent, RunCompletedEvent)):
+                citacoes = evento.citations or citacoes
+            if isinstance(evento, RunContentEvent) and evento.content:
+                trecho = str(evento.content)
+            elif (
+                isinstance(evento, RunCompletedEvent)
+                and not partes
+                and evento.content
+            ):
+                trecho = str(evento.content)
+            else:
+                continue
+            partes.append(trecho)
+            if on_final:
+                yield trecho
+        if on_progress:
+            on_progress('Conferindo os links encontrados...')
+        resposta = formatar_resposta_web(''.join(partes), citacoes) or (
+            'Não consegui confirmar uma resposta em páginas da internet '
+            'com links verificáveis agora. Tente novamente mais tarde.'
+        )
+        if on_final:
+            on_final(resposta)
+        else:
+            yield resposta
 
     def _triage(self, query: str, historico: str) -> TriageDecision:
         prompt = (
