@@ -7,6 +7,11 @@ from agno.run.agent import RunCompletedEvent, RunContentEvent
 
 from chat.agents.contracts import Route, TriageDecision
 from chat.agents.factory import build_agents
+from chat.agents.memory import (
+    EvidenceMemory,
+    chave_fonte,
+    remap_history_citations,
+)
 from chat.agents.tools import MAX_BUSCAS_ADICIONAIS, EvidenceContext
 from chat.agents.web import formatar_resposta_web
 from chat.models import Mensagem
@@ -47,8 +52,10 @@ class IntegraCARAgentWorkflow:
                 on_progress(texto)
 
         progresso('Analisando sua pergunta...')
+        mensagens = list(mensagens)[-12:]
+        memoria = EvidenceMemory.from_messages(mensagens)
         historico = self._format_history(mensagens)
-        decision = self._triage(query, historico)
+        decision = self._triage(query, historico + memoria.format_for_triage())
 
         if decision.needs_clarification and decision.clarification_question:
             progresso('Preparando uma pergunta de esclarecimento...')
@@ -71,7 +78,11 @@ class IntegraCARAgentWorkflow:
 
         progresso('Buscando fontes nos documentos...')
         evidencias = self._retrieve_evidence(
-            query, decision, on_sources=on_sources, on_progress=on_progress
+            query,
+            decision,
+            memoria=memoria,
+            on_sources=on_sources,
+            on_progress=on_progress,
         )
         if not evidencias.fontes:
             yield (
@@ -81,6 +92,7 @@ class IntegraCARAgentWorkflow:
             )
             return
 
+        historico = self._format_history(mensagens, fontes=evidencias.fontes)
         contexto = self._format_evidence(evidencias)
         prompt = self._specialist_prompt(
             query=query,
@@ -104,7 +116,10 @@ class IntegraCARAgentWorkflow:
             )
             progresso('Revisando a resposta...')
             yield from self._review(
-                query, self._format_sources(evidencias.fontes), parecer
+                query,
+                self._format_evidence(evidencias),
+                parecer,
+                historico,
             )
             return
 
@@ -132,7 +147,10 @@ class IntegraCARAgentWorkflow:
         )
         progresso('Revisando a resposta...')
         yield from self._review(
-            query, self._format_sources(evidencias.fontes), pareceres
+            query,
+            self._format_evidence(evidencias),
+            pareceres,
+            historico,
         )
 
     def _retrieve_evidence(
@@ -140,11 +158,22 @@ class IntegraCARAgentWorkflow:
         query: str,
         decision: TriageDecision,
         *,
+        memoria: EvidenceMemory,
         on_sources: Callable[[list[dict]], None] | None,
         on_progress: Callable[[str], None] | None,
     ) -> EvidenceContext:
+        fontes = list(self.retriever(decision.rewritten_query, 12))
+        busca_inicial_vazia = not fontes
+        chaves = {chave_fonte(fonte) for fonte in fontes}
+        numeros_memoria = set()
+        for fonte in memoria.fontes:
+            if chave_fonte(fonte) not in chaves:
+                fontes.append(fonte)
+                numeros_memoria.add(len(fontes))
+                chaves.add(chave_fonte(fonte))
         evidencias = EvidenceContext(
-            fontes=list(self.retriever(decision.rewritten_query, 12)),
+            fontes=fontes,
+            numeros_memoria=numeros_memoria,
             retriever=self.retriever,
             on_sources=on_sources,
             on_progress=on_progress,
@@ -153,7 +182,10 @@ class IntegraCARAgentWorkflow:
         for busca in decision.complementary_queries:
             evidencias.buscar(busca)
         if (
-            not evidencias.fontes
+            (
+                not evidencias.fontes
+                or (busca_inicial_vazia and not decision.complementary_queries)
+            )
             and evidencias.buscas_adicionais < MAX_BUSCAS_ADICIONAIS
             and normalize(query[:300]) not in evidencias.consultas_realizadas
         ):
@@ -170,6 +202,14 @@ class IntegraCARAgentWorkflow:
     def _format_evidence(cls, evidencias: EvidenceContext) -> str:
         return (
             cls._format_sources(evidencias.fontes)
+            + '\n\nFontes reutilizadas de respostas anteriores (snapshots): '
+            + (
+                ', '.join(
+                    f'[Fonte {n}]' for n in sorted(evidencias.numeros_memoria)
+                )
+                or 'nenhuma'
+            )
+            + '. Confira se sustentam a pergunta atual e não presuma atualização.\n'
             + '\n\n<orcamento_de_busca>\n'
             f'Buscas complementares já utilizadas: {evidencias.buscas_adicionais}'
             f'/{MAX_BUSCAS_ADICIONAIS}. Não repita buscas já feitas: '
@@ -279,8 +319,12 @@ class IntegraCARAgentWorkflow:
         query: str,
         contexto: str,
         pareceres: str,
+        historico: str = '',
     ) -> Generator[str, None, None]:
         prompt = (
+            '<historico>\n'
+            f'{historico}\n'
+            '</historico>\n\n'
             '<pergunta>\n'
             f'{query}\n'
             '</pergunta>\n\n'
@@ -310,7 +354,10 @@ class IntegraCARAgentWorkflow:
         return '\n\n'.join(blocos)
 
     @staticmethod
-    def _format_history(mensagens: Iterable[Mensagem]) -> str:
+    def _format_history(
+        mensagens: Iterable[Mensagem],
+        fontes: list[RetrievedChunk] | None = None,
+    ) -> str:
         historico = []
         for mensagem in list(mensagens)[-12:]:
             papel = (
@@ -318,7 +365,13 @@ class IntegraCARAgentWorkflow:
                 if mensagem.tipo == Mensagem.OpcoesTipo.USUARIO
                 else 'Assistente'
             )
-            historico.append(f'{papel}: {mensagem.conteudo}')
+            conteudo = (
+                remap_history_citations(mensagem, fontes)
+                if fontes is not None
+                and mensagem.tipo == Mensagem.OpcoesTipo.ASSISTENTE
+                else mensagem.conteudo
+            )
+            historico.append(f'{papel}: {conteudo}')
         return '\n'.join(historico) or 'Sem mensagens anteriores.'
 
     @staticmethod

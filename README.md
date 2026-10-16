@@ -67,6 +67,37 @@ citações, limites compartilhados, deduplicação de consultas e esclarecimento
 Eles verificam o fluxo com agentes e recuperação simulados; ganhos de qualidade
 no acervo real ainda precisam ser avaliados com perguntas representativas.
 
+## Memória de evidências da conversa
+
+O agente recebe novamente snapshots dos trechos documentais das últimas 12
+mensagens da ramificação selecionada. A memória prioriza mensagens recentes e
+fontes citadas, com no máximo quatro trechos e 6.000 caracteres. Trechos que não
+cabem são ignorados sem truncar seu conteúdo. Mensagens antigas sem fontes salvas
+continuam funcionando normalmente.
+
+A triagem usa esses trechos para entender referências como “essa exceção”. Os
+especialistas recebem a união da busca atual com a memória, deduplicada por
+documento e conteúdo; fontes novas mantêm prioridade. Os trechos reutilizados são
+identificados como snapshots e ficam disponíveis na ferramenta de consulta, nas
+fontes salvas da nova resposta e, consequentemente, na exportação. O revisor
+recebe também o histórico com as citações remapeadas para os números atuais.
+Referências sem trecho disponível são marcadas como fora do contexto atual.
+
+A memória vem exclusivamente do histórico da ramificação fornecido pelo Django,
+sem estado global por usuário e sem recuperar outras conversas. Os snapshots não
+comprovam relevância nem vigência para a nova pergunta: os prompts orientam a
+conferir o suporte documental e buscar mais evidências quando necessário. A busca
+atual continua acontecendo e o limite total de 18 fontes permanece.
+
+```bash
+.venv/bin/python manage.py test chat.tests.test_evidence_memory --noinput
+```
+
+Os testes simulados cobrem continuidade, numeração, deduplicação, limites,
+compatibilidade com registros antigos, isolamento entre execuções e contexto do
+revisor. A avaliação da qualidade das respostas com o modelo real continua sendo
+necessária.
+
 ## 📋 Índice
 
 - [Visão Geral](#visão-geral)

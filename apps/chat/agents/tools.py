@@ -31,6 +31,7 @@ class EvidenceContext:
     on_progress: Callable[[str], None] | None = None
     buscas_adicionais: int = 0
     consultas_canonicas: int = 0
+    numeros_memoria: set[int] = field(default_factory=set)
     _indices: set[tuple[int, str]] = field(default_factory=set)
     consultas_realizadas: set[str] = field(default_factory=set)
 
