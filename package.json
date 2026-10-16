@@ -3,7 +3,8 @@
   "type": "module",
   "scripts": {
     "dev": "TAILWIND_MODE=watch vite",
-    "build": "TAILWIND_MODE=build vite build"
+    "build": "TAILWIND_MODE=build vite build",
+    "typecheck": "vue-tsc --noEmit -p frontend/tsconfig.json"
   },
   "overrides": {
     "vite": {

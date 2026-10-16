@@ -2,7 +2,8 @@ import re
 from collections.abc import Iterable
 
 from django.contrib.auth.decorators import login_required
-from django.http import HttpRequest
+from django.core.exceptions import ValidationError
+from django.http import HttpRequest, HttpResponse, HttpResponseBadRequest
 from django.shortcuts import get_object_or_404, redirect
 from django.utils import timezone
 from django.utils.decorators import method_decorator
@@ -10,6 +11,7 @@ from django.views import View
 from django.views.decorators.csrf import csrf_exempt
 from inertia import render, share
 
+from chat.export import exportar_markdown, selecionar_ramificacao
 from chat.forms import ImportarDocumentosForm
 from chat.models import Conversa, Documento, Mensagem, StatusDocumento
 
@@ -33,9 +35,9 @@ def montar_arvore_mensagens(
 
     for mensagem in mensagens_ordenadas:
         if mensagem.mensagem_pai_id in map_mensagens:
-            map_mensagens[mensagem.mensagem_pai_id][
-                'mensagens_filhas'
-            ].append(mensagem.id)
+            map_mensagens[mensagem.mensagem_pai_id]['mensagens_filhas'].append(
+                mensagem.id
+            )
 
     return map_mensagens
 
@@ -155,3 +157,29 @@ class ExcluirConversaView(View):
             return redirect('index')
 
         return redirect(referer or 'index')
+
+
+@method_decorator(login_required, name='dispatch')
+class ExportarConversaView(View):
+    def get(self, request: HttpRequest, id_conversa: int):
+        conversa = get_object_or_404(
+            Conversa, id=id_conversa, usuario=request.user
+        )
+        try:
+            id_ultima = int(request.GET.get('ultima_mensagem', ''))
+            mensagens = selecionar_ramificacao(
+                conversa.mensagens.order_by('criado_em', 'id'), id_ultima
+            )
+        except (ValueError, ValidationError):
+            return HttpResponseBadRequest(
+                'Selecione uma versão válida da conversa.'
+            )
+        resposta = HttpResponse(
+            exportar_markdown(conversa, mensagens),
+            content_type='text/markdown; charset=utf-8',
+        )
+        resposta['Content-Disposition'] = (
+            f'attachment; filename="integracar-conversa-{conversa.id}.md"'
+        )
+        resposta['Cache-Control'] = 'private, no-store'
+        return resposta

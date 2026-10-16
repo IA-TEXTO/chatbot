@@ -12,6 +12,11 @@ urlpatterns = [
         views.ExcluirConversaView.as_view(),
         name='excluir_conversa',
     ),
+    path(
+        'c/<int:id_conversa>/exportar/',
+        views.ExportarConversaView.as_view(),
+        name='exportar_conversa',
+    ),
     path('documentos/', views.DocumentosView.as_view(), name='documentos'),
     path(
         'documentos/<int:id_documento>/excluir/',

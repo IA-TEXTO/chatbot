@@ -8,7 +8,7 @@ const page = usePage<{
     urls: Record<string, string>,
 }>();
 
-const props = defineProps<{
+defineProps<{
     respostas_canonicas: PerguntaCanonica[];
 }>();
 

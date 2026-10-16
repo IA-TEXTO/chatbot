@@ -2,6 +2,40 @@
 
 Um chatbot inteligente baseado em RAG (Retrieval-Augmented Generation) para o sistema IntegraCAR, desenvolvido com Django, Vue.js e LangChain.
 
+## Consultas organizadas e exportáveis
+
+O histórico agora permite buscar conversas pelo nome (sem diferenciar acentos ou
+maiúsculas) e renomeá-las com até 50 caracteres. Usuários autenticados também
+podem baixar a consulta em Markdown pelo botão **Exportar consulta**. O arquivo
+inclui perguntas, respostas e trechos das fontes recuperadas. Ao navegar entre
+versões editadas, apenas a ramificação selecionada é exportada.
+
+Renomeação e exportação são restritas ao proprietário da conversa. A exportação
+fica indisponível enquanto a resposta é gerada. Não há migrações nem novas
+dependências para esta entrega.
+
+Roteiro de demonstração:
+
+1. Entre na conta e faça uma pergunta sobre o CAR.
+2. Renomeie a conversa para “Documentação CAR”.
+3. Busque “documentacao” no histórico para reencontrá-la.
+4. Edite uma pergunta e alterne entre as versões com as setas.
+5. Clique em **Exportar consulta** e confira o arquivo `.md`: ele contém apenas
+   a versão selecionada e os trechos das fontes, quando recuperadas.
+
+Validação local:
+
+```bash
+npm run build
+npm run typecheck
+.venv/bin/python manage.py test chat.tests --noinput
+```
+
+Os testes de histórico cobrem ramificações, caminhos inválidos, conteúdo da
+exportação, validação do nome e restrições de acesso. Usam objetos simulados no
+acesso ao banco; o roteiro acima complementa a validação na aplicação com banco
+e serviço de IA em execução.
+
 ## 📋 Índice
 
 - [Visão Geral](#visão-geral)

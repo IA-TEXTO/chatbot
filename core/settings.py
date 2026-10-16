@@ -161,6 +161,7 @@ MEDIA_ROOT = BASE_DIR / 'media'
 DJANGO_VITE = {
     'default': {
         'dev_mode': DEBUG,
+        'manifest_path': BASE_DIR / 'frontend' / 'dist' / 'manifest.json',
         'dev_server_host': env.str(
             'DJANGO_VITE_DEV_SERVER_HOST', default='localhost'
         ),
