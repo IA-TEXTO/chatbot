@@ -7,10 +7,10 @@ from agno.run.agent import RunCompletedEvent, RunContentEvent
 
 from chat.agents.contracts import Route, TriageDecision
 from chat.agents.factory import build_agents
-from chat.agents.tools import EvidenceContext
+from chat.agents.tools import MAX_BUSCAS_ADICIONAIS, EvidenceContext
 from chat.agents.web import formatar_resposta_web
 from chat.models import Mensagem
-from chat.rag import Rag, RetrievedChunk
+from chat.rag import Rag, RetrievedChunk, normalize
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +57,9 @@ class IntegraCARAgentWorkflow:
 
         if decision.needs_web or self._pedido_web_explicito(query):
             yield from self._run_web(
-                decision.rewritten_query, on_progress=on_progress, on_final=on_final
+                decision.rewritten_query,
+                on_progress=on_progress,
+                on_final=on_final,
             )
             return
 
@@ -68,14 +70,10 @@ class IntegraCARAgentWorkflow:
             return
 
         progresso('Buscando fontes nos documentos...')
-        fontes = self.retriever(decision.rewritten_query, 12)
-        evidencias = EvidenceContext(
-            fontes=list(fontes),
-            retriever=self.retriever,
-            on_sources=on_sources,
-            on_progress=on_progress,
+        evidencias = self._retrieve_evidence(
+            query, decision, on_sources=on_sources, on_progress=on_progress
         )
-        if not fontes:
+        if not evidencias.fontes:
             yield (
                 'Não encontrei informações suficientes nos documentos '
                 'disponíveis para responder com segurança. Informe mais detalhes '
@@ -83,7 +81,7 @@ class IntegraCARAgentWorkflow:
             )
             return
 
-        contexto = self._format_sources(fontes)
+        contexto = self._format_evidence(evidencias)
         prompt = self._specialist_prompt(
             query=query,
             historico=historico,
@@ -120,7 +118,7 @@ class IntegraCARAgentWorkflow:
             self._specialist_prompt(
                 query=query,
                 historico=historico,
-                contexto=self._format_sources(evidencias.fontes),
+                contexto=self._format_evidence(evidencias),
             ),
             dependencies=dependencies,
         )
@@ -135,6 +133,48 @@ class IntegraCARAgentWorkflow:
         progresso('Revisando a resposta...')
         yield from self._review(
             query, self._format_sources(evidencias.fontes), pareceres
+        )
+
+    def _retrieve_evidence(
+        self,
+        query: str,
+        decision: TriageDecision,
+        *,
+        on_sources: Callable[[list[dict]], None] | None,
+        on_progress: Callable[[str], None] | None,
+    ) -> EvidenceContext:
+        evidencias = EvidenceContext(
+            fontes=list(self.retriever(decision.rewritten_query, 12)),
+            retriever=self.retriever,
+            on_sources=on_sources,
+            on_progress=on_progress,
+            consultas_realizadas={normalize(decision.rewritten_query[:300])},
+        )
+        for busca in decision.complementary_queries:
+            evidencias.buscar(busca)
+        if (
+            not evidencias.fontes
+            and evidencias.buscas_adicionais < MAX_BUSCAS_ADICIONAIS
+            and normalize(query[:300]) not in evidencias.consultas_realizadas
+        ):
+            # A reescrita pode perder um termo específico usado pelo usuário.
+            evidencias.buscar(query)
+        logger.info(
+            'Recuperação documental: %d fontes, %d buscas complementares.',
+            len(evidencias.fontes),
+            evidencias.buscas_adicionais,
+        )
+        return evidencias
+
+    @classmethod
+    def _format_evidence(cls, evidencias: EvidenceContext) -> str:
+        return (
+            cls._format_sources(evidencias.fontes)
+            + '\n\n<orcamento_de_busca>\n'
+            f'Buscas complementares já utilizadas: {evidencias.buscas_adicionais}'
+            f'/{MAX_BUSCAS_ADICIONAIS}. Não repita buscas já feitas: '
+            f'{", ".join(sorted(evidencias.consultas_realizadas))}.\n'
+            '</orcamento_de_busca>'
         )
 
     def _run_web(

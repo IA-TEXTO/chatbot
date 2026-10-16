@@ -36,6 +36,37 @@ exportação, validação do nome e restrições de acesso. Usam objetos simulad
 acesso ao banco; o roteiro acima complementa a validação na aplicação com banco
 e serviço de IA em execução.
 
+## Recuperação adaptativa do agente
+
+A triagem agora pode planejar até duas consultas complementares para dúvidas com
+assuntos distintos, usando a mesma chamada de IA já existente. O fluxo consulta
+esses aspectos antes de gerar a resposta e combina os trechos sem duplicar fontes
+nem alterar os números já atribuídos. Se não houver evidência, tenta a pergunta
+original quando ela difere da busca reescrita e ainda há orçamento disponível.
+Sem fontes após essas tentativas, mantém a resposta de informação insuficiente.
+
+O planejamento e as ferramentas dos especialistas compartilham o limite de duas
+buscas adicionais por resposta e de 18 fontes. Buscas repetidas, inclusive com
+variações de acento ou caixa, não disparam nova recuperação nem gastam tentativas.
+Perguntas simples sem consultas planejadas mantêm uma única busca inicial quando
+ela retorna trechos. Cada busca extra pode acrescentar latência e custo de
+embedding; não há nova chamada de geração dedicada ao planejamento.
+
+Cenário para demonstrar: pergunte “Como declarar APP e quais documentos preciso
+para iniciar o CAR?”. A triagem pode separar os aspectos da pergunta e o agente
+recebe os trechos complementares antes de responder. A escolha das consultas é
+feita pelo modelo, portanto pode variar entre execuções.
+
+```bash
+.venv/bin/python manage.py test chat.tests.test_adaptive_retrieval --noinput
+```
+
+Os dez cenários controlados cobrem recuperação após busca vazia, preservação de
+termos da pergunta original, perguntas com múltiplos assuntos, estabilidade das
+citações, limites compartilhados, deduplicação de consultas e esclarecimento.
+Eles verificam o fluxo com agentes e recuperação simulados; ganhos de qualidade
+no acervo real ainda precisam ser avaliados com perguntas representativas.
+
 ## 📋 Índice
 
 - [Visão Geral](#visão-geral)
@@ -247,7 +278,7 @@ def top_k_resultados(query: str, k: int = 5):
 | Revisor | Remove afirmações sem evidência e confere as citações |
 | Geral | Atende cumprimentos e informa o escopo do assistente |
 
-Os especialistas podem consultar orientações canônicas, buscar até duas vezes mais
+Os especialistas podem consultar orientações canônicas, usar o saldo das duas buscas complementares por resposta
 nos PDFs e examinar um trecho pelo número da fonte. Essas ferramentas são apenas
 de leitura; os trechos adicionais mantêm números estáveis na resposta. Cada
 especialista tem limite de quatro chamadas de ferramenta por execução. As
