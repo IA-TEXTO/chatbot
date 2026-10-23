@@ -84,7 +84,7 @@ class FerramentasDosAgentesTests(TestCase):
         eventos.put(('fim', None))
         partes = []
 
-        enviados = list(_transmitir_eventos(eventos, partes, []))
+        enviados = list(_transmitir_eventos(eventos, partes, [], []))
 
         assert enviados[0] == {
             'tipo': 'progresso',
@@ -113,7 +113,7 @@ class FerramentasDosAgentesTests(TestCase):
     ):
         fontes = [{'numero': 1, 'documento_id': 1, 'nome': 'Manual'}]
 
-        def gerar(on_progress, on_final):
+        def gerar(on_progress, on_final, on_skill):
             on_progress('Buscando fontes...')
             yield 'Resposta [Fonte 2].'
 
@@ -131,8 +131,26 @@ class FerramentasDosAgentesTests(TestCase):
         objetos.filter.return_value.update.assert_called_once()
 
     @patch('chat.api.Mensagem.objects')
+    def test_stream_transmite_e_salva_skill_usada(self, objetos):
+        def gerar(on_progress, on_final, on_skill):
+            on_skill('fluxo-processos-digitais.md')
+            yield 'Resposta.'
+
+        linhas = list(_stream_resposta({}, gerar, [], 10))
+        eventos = [json.loads(linha) for linha in linhas]
+
+        assert eventos[1] == {
+            'tipo': 'skill',
+            'conteudo': 'fluxo-processos-digitais.md',
+        }
+        assert (
+            objetos.filter.return_value.update.call_args.kwargs['skill']
+            == 'fluxo-processos-digitais.md'
+        )
+
+    @patch('chat.api.Mensagem.objects')
     def test_stream_substitui_texto_web_pela_versao_com_links(self, objetos):
-        def gerar(on_progress, on_final):
+        def gerar(on_progress, on_final, on_skill):
             yield 'Resposta da web.'
             on_final('Resposta da web. [Web 1](<https://idaf.es.gov.br>)')
 

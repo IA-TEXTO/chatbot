@@ -224,6 +224,15 @@ async function curtirMensagem(valor: boolean) {
 <template>
     <article class="mt-4 flex flex-col items-start gap-2" aria-label="Mensagem do assistente">
 
+        <div v-if="mensagem.skill" class="badge badge-soft badge-primary badge-sm gap-1.5"
+            :title="`Esta resposta seguiu o roteiro da skill ${mensagem.skill}`">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="size-3.5" aria-hidden="true">
+                <path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z" />
+            </svg>
+            <span>Usando skill <code class="font-mono">{{ mensagem.skill }}</code></span>
+        </div>
+
         <div v-if="mensagem.conteudo"
             class="markdown w-full rounded-2xl bg-base-100"
             v-html="respostaHtml" @mouseover="aoPassarMouse" @mouseout="aoSairMouse"

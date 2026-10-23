@@ -22,6 +22,14 @@ class AtualizarTipoDocumentoSchema(ModelSchema):
         fields = ['tipo']
 
 
+class EditarSkillSchema(Schema):
+    conteudo: str
+
+
+class AlterarStatusSkillSchema(Schema):
+    ativa: bool
+
+
 class RenomearConversaSchema(Schema):
     nome: str = Field(min_length=1, max_length=50)
 

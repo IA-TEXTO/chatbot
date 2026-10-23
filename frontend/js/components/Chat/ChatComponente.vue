@@ -17,6 +17,7 @@ export type TMensagem = {
     tipo: 'USUARIO' | 'ASSISTENTE';
     conteudo: string;
     fontes: TFonte[];
+    skill?: string;
     progresso?: string;
     mensagem_pai: number | null;
     mensagens_filhas: number[];
@@ -255,6 +256,8 @@ async function criarRamificacao(
                     if (!cabecalhoProcessado) {
                         aplicarIdsPersistidos(evento as chatResponse, mensagemUsuario, botMessage);
                         cabecalhoProcessado = true;
+                    } else if (evento.tipo === 'skill') {
+                        mapMensagens.value[botMessage.id].skill = evento.conteudo;
                     } else if (evento.tipo === 'progresso') {
                         mapMensagens.value[botMessage.id].progresso = evento.conteudo;
                     } else if (evento.tipo === 'resposta_final') {

@@ -42,7 +42,9 @@ class AdaptiveRetrievalTests(TestCase):
                 complementary_queries=['documentos necessários CAR'],
             )
         )
-        workflow = IntegraCARAgentWorkflow(agents=agents, retriever=retriever)
+        workflow = IntegraCARAgentWorkflow(
+            agents=agents, retriever=retriever, skills=dict
+        )
         publicadas = []
         etapas = []
 
@@ -68,7 +70,9 @@ class AdaptiveRetrievalTests(TestCase):
         query = 'Como corrigir erro GEO-123 no CAR?'
         retriever = ScenarioRetriever({query: [fonte('Orientação GEO-123')]})
         agents = make_agents(decision())
-        workflow = IntegraCARAgentWorkflow(agents=agents, retriever=retriever)
+        workflow = IntegraCARAgentWorkflow(
+            agents=agents, retriever=retriever, skills=dict
+        )
 
         ''.join(workflow.run(query, []))
 
@@ -84,7 +88,9 @@ class AdaptiveRetrievalTests(TestCase):
             'documentos CAR': [inicial, fonte('Documentação exigida', 2)],
         })
         agents = make_agents(triage)
-        workflow = IntegraCARAgentWorkflow(agents=agents, retriever=retriever)
+        workflow = IntegraCARAgentWorkflow(
+            agents=agents, retriever=retriever, skills=dict
+        )
         fontes = []
 
         ''.join(
@@ -107,7 +113,9 @@ class AdaptiveRetrievalTests(TestCase):
         agents = make_agents(
             decision(complementary_queries=['APP CAR', 'reserva legal CAR'])
         )
-        workflow = IntegraCARAgentWorkflow(agents=agents, retriever=retriever)
+        workflow = IntegraCARAgentWorkflow(
+            agents=agents, retriever=retriever, skills=dict
+        )
 
         resposta = ''.join(workflow.run('Pergunta original', []))
 
@@ -119,7 +127,9 @@ class AdaptiveRetrievalTests(TestCase):
     def test_simple_question_keeps_single_search(self):
         retriever = ScenarioRetriever({'preenchimento CAR': [fonte('Trecho')]})
         workflow = IntegraCARAgentWorkflow(
-            agents=make_agents(decision()), retriever=retriever
+            agents=make_agents(decision()),
+            retriever=retriever,
+            skills=dict,
         )
         ''.join(workflow.run('Como preencher?', []))
         assert retriever.calls == [('preenchimento CAR', 12)]
@@ -140,7 +150,9 @@ class AdaptiveRetrievalTests(TestCase):
         agents = make_agents(
             decision(complementary_queries=['APP CAR', 'documentos CAR'])
         )
-        workflow = IntegraCARAgentWorkflow(agents=agents, retriever=retriever)
+        workflow = IntegraCARAgentWorkflow(
+            agents=agents, retriever=retriever, skills=dict
+        )
         ''.join(workflow.run('Como preencher?', []))
         contexto = agents['manual'].calls[0]['dependencies'][
             'evidence_context'
@@ -178,7 +190,9 @@ class AdaptiveRetrievalTests(TestCase):
                 clarification_question='Em qual etapa aparece o erro?',
             )
         )
-        workflow = IntegraCARAgentWorkflow(agents=agents, retriever=retriever)
+        workflow = IntegraCARAgentWorkflow(
+            agents=agents, retriever=retriever, skills=dict
+        )
         resposta = ''.join(workflow.run('Deu erro', []))
         assert resposta == 'Em qual etapa aparece o erro?'
         assert not retriever.calls

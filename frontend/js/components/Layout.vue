@@ -187,6 +187,15 @@ function fecharSidebarEmTelaPequena() {
                             <span class="is-drawer-close:hidden">Curadoria</span>
                         </Link>
                     </li>
+                    <li v-if="page.props.user.is_staff">
+                        <Link :href="page.props.urls['skills']"
+                            class="is-drawer-close:tooltip is-drawer-close:tooltip-right rounded-xl border border-transparent px-2 text-nowrap"
+                            :class="{ 'bg-accent': isActive(page.props.urls['skills']) }" data-tip="Skills"
+                            @click="fecharSidebarEmTelaPequena">
+                            <i class="bi bi-lightning-charge"></i>
+                            <span class="is-drawer-close:hidden">Skills</span>
+                        </Link>
+                    </li>
                 </ul>
 
                 <hr class="my-2">

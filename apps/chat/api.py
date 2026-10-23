@@ -13,12 +13,15 @@ from ninja.errors import HttpError
 from openai import OpenAIError
 
 from chat.agents import IntegraCARAgentWorkflow
+from chat.agents.skills import ler_markdown, serializar_skill
 from chat.agents.tools import validar_citacoes
-from chat.models import Conversa, Documento, Mensagem
+from chat.models import Conversa, Documento, Mensagem, Skill
 from chat.schemas import (
+    AlterarStatusSkillSchema,
     AtualizarTipoDocumentoSchema,
     ChatSchema,
     CurtirMensagemSchema,
+    EditarSkillSchema,
     RenomearConversaSchema,
 )
 
@@ -138,16 +141,22 @@ def chat_endpoint(request: HttpRequest, payload: ChatSchema):
 
     fontes = []
 
+    skill_usada = []
+
     def registrar_fontes(fontes_recuperadas):
         fontes[:] = fontes_recuperadas
 
-    def gerar_resposta(on_progress=None, on_final=None):
+    def registrar_skill(skill):
+        skill_usada[:] = [skill]
+
+    def gerar_resposta(on_progress=None, on_final=None, on_skill=None):
         return agent_workflow.run(
             mensagem,
             mensagens,
             on_sources=registrar_fontes,
             on_progress=on_progress,
             on_final=on_final,
+            on_skill=on_skill or registrar_skill,
         )
 
     if not stream:
@@ -155,16 +164,18 @@ def chat_endpoint(request: HttpRequest, payload: ChatSchema):
             resposta_completa = ''.join(gerar_resposta())
         except AI_ERRORS:
             Mensagem.objects.filter(id=mensagem_resposta.id).update(
-                conteudo=AI_ERROR_MESSAGE, fontes=[]
+                conteudo=AI_ERROR_MESSAGE, fontes=[], skill=''
             )
             return 503, base_response | {'resposta': AI_ERROR_MESSAGE}
         resposta_completa = validar_citacoes(resposta_completa, len(fontes))
+        skill = ''.join(skill_usada)
         Mensagem.objects.filter(id=mensagem_resposta.id).update(
-            conteudo=resposta_completa, fontes=fontes
+            conteudo=resposta_completa, fontes=fontes, skill=skill
         )
         return 200, base_response | {
             'resposta': resposta_completa,
             'fontes': fontes,
+            'skill': skill,
         }
 
     return StreamingHttpResponse(
@@ -180,6 +191,7 @@ def _executar_resposta(gerar_resposta, eventos):
         for texto in gerar_resposta(
             on_progress=lambda etapa: eventos.put(('progresso', etapa)),
             on_final=lambda resposta: eventos.put(('final', resposta)),
+            on_skill=lambda skill: eventos.put(('skill', skill)),
         ):
             eventos.put(('trecho', texto))
     except (AgnoError, OpenAIError):
@@ -193,7 +205,7 @@ def _executar_resposta(gerar_resposta, eventos):
         eventos.put(('fim', None))
 
 
-def _transmitir_eventos(eventos, partes, fontes):
+def _transmitir_eventos(eventos, partes, fontes, skill_usada):
     etapa_atual = 'Analisando sua pergunta...'
     falhou = False
     while True:
@@ -207,11 +219,15 @@ def _transmitir_eventos(eventos, partes, fontes):
         if tipo == 'progresso':
             etapa_atual = conteudo
             yield {'tipo': tipo, 'conteudo': conteudo}
+        elif tipo == 'skill' and not falhou:
+            skill_usada[:] = [conteudo]
+            yield {'tipo': tipo, 'conteudo': conteudo}
         elif tipo == 'final' and not falhou:
             partes[:] = [conteudo]
         elif tipo == 'erro':
             falhou = True
             fontes.clear()
+            skill_usada.clear()
             partes[:] = [conteudo]
             yield {'tipo': 'resposta_final', 'conteudo': conteudo}
         elif tipo == 'trecho' and not falhou:
@@ -229,12 +245,13 @@ def _stream_resposta(base_response, gerar_resposta, fontes, id_resposta):
         daemon=True,
     ).start()
     partes = []
-    for evento in _transmitir_eventos(eventos, partes, fontes):
+    skill_usada = []
+    for evento in _transmitir_eventos(eventos, partes, fontes, skill_usada):
         yield json.dumps(evento) + '\n'
 
     resposta_final = validar_citacoes(''.join(partes), len(fontes))
     Mensagem.objects.filter(id=id_resposta).update(
-        conteudo=resposta_final, fontes=fontes
+        conteudo=resposta_final, fontes=fontes, skill=''.join(skill_usada)
     )
     yield (
         json.dumps({
@@ -301,6 +318,54 @@ def arquivo_fonte(request: HttpRequest, id_mensagem: int, id_documento: int):
         content_type='application/pdf',
         filename=documento.arquivo.name.rsplit('/', 1)[-1],
     )
+
+
+def _obter_skill_editavel(request: HttpRequest, id_skill: int) -> Skill:
+    if not request.user.is_staff:
+        raise HttpError(403, 'Somente a equipe pode gerenciar skills.')
+    skill = get_object_or_404(Skill, id=id_skill)
+    if skill.status in {Skill.Status.GERANDO, Skill.Status.ERRO}:
+        raise HttpError(400, 'Esta skill não tem um rascunho para editar.')
+    return skill
+
+
+def _validar_markdown(nome: str, conteudo: str):
+    try:
+        ler_markdown(nome, conteudo)
+    except ValueError as erro:
+        raise HttpError(400, str(erro)) from erro
+
+
+@chat_router.get('/skills/{id_skill}')
+def detalhar_skill(request: HttpRequest, id_skill: int):
+    if not request.user.is_staff:
+        raise HttpError(403, 'Somente a equipe pode gerenciar skills.')
+    return serializar_skill(get_object_or_404(Skill, id=id_skill))
+
+
+@chat_router.put('/skills/{id_skill}')
+def editar_skill(
+    request: HttpRequest, id_skill: int, payload: EditarSkillSchema
+):
+    skill = _obter_skill_editavel(request, id_skill)
+    _validar_markdown(skill.nome, payload.conteudo)
+    skill.conteudo = payload.conteudo.strip() + '\n'
+    skill.save(update_fields=['conteudo', 'atualizado_em'])
+    return serializar_skill(skill)
+
+
+@chat_router.patch('/skills/{id_skill}/status')
+def alterar_status_skill(
+    request: HttpRequest, id_skill: int, payload: AlterarStatusSkillSchema
+):
+    skill = _obter_skill_editavel(request, id_skill)
+    if payload.ativa:
+        _validar_markdown(skill.nome, skill.conteudo)
+    skill.status = (
+        Skill.Status.ATIVA if payload.ativa else Skill.Status.RASCUNHO
+    )
+    skill.save(update_fields=['status', 'atualizado_em'])
+    return serializar_skill(skill)
 
 
 @chat_router.patch('/conversas/{id_conversa}')

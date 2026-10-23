@@ -33,7 +33,9 @@ class EvidenceMemoryTests(TestCase):
         retriever = ScenarioRetriever({
             'preenchimento CAR': [fonte('Trecho atual')]
         })
-        workflow = IntegraCARAgentWorkflow(agents=agents, retriever=retriever)
+        workflow = IntegraCARAgentWorkflow(
+            agents=agents, retriever=retriever, skills=dict
+        )
         fontes = []
         historico = [
             mensagem(
@@ -63,7 +65,9 @@ class EvidenceMemoryTests(TestCase):
     ):
         agents = make_agents(decision())
         workflow = IntegraCARAgentWorkflow(
-            agents=agents, retriever=ScenarioRetriever({})
+            agents=agents,
+            retriever=ScenarioRetriever({}),
+            skills=dict,
         )
         resposta = ''.join(
             workflow.run('E essa exceção?', [mensagem(fontes=[snapshot()])])
@@ -76,7 +80,9 @@ class EvidenceMemoryTests(TestCase):
         retriever = ScenarioRetriever({
             'preenchimento CAR': [fonte('Mesmo trecho', 7)]
         })
-        workflow = IntegraCARAgentWorkflow(agents=agents, retriever=retriever)
+        workflow = IntegraCARAgentWorkflow(
+            agents=agents, retriever=retriever, skills=dict
+        )
         fontes = []
         ''.join(
             workflow.run(
@@ -162,7 +168,9 @@ class EvidenceMemoryTests(TestCase):
         triage.route = 'legislacao'
         agents = make_agents(triage)
         workflow = IntegraCARAgentWorkflow(
-            agents=agents, retriever=ScenarioRetriever({})
+            agents=agents,
+            retriever=ScenarioRetriever({}),
+            skills=dict,
         )
         ''.join(
             workflow.run(
@@ -184,7 +192,9 @@ class EvidenceMemoryTests(TestCase):
     def test_no_memory_leaks_between_runs_of_same_workflow(self):
         agents = make_agents(decision())
         workflow = IntegraCARAgentWorkflow(
-            agents=agents, retriever=ScenarioRetriever({})
+            agents=agents,
+            retriever=ScenarioRetriever({}),
+            skills=dict,
         )
         ''.join(
             workflow.run('E essa exceção?', [mensagem(fontes=[snapshot()])])

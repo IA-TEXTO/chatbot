@@ -34,11 +34,15 @@ class WebSearchTests(TestCase):
 
     def test_nao_duplica_link_que_o_modelo_ja_citou(self):
         texto = 'Consulte ([Idaf](https://idaf.es.gov.br/car)).'
-        citacoes = Citations(raw=[{
-            'type': 'url_citation',
-            'end_index': len(texto),
-            'url': 'https://idaf.es.gov.br/car',
-        }])
+        citacoes = Citations(
+            raw=[
+                {
+                    'type': 'url_citation',
+                    'end_index': len(texto),
+                    'url': 'https://idaf.es.gov.br/car',
+                }
+            ]
+        )
 
         assert formatar_resposta_web(texto, citacoes) == texto
 
@@ -88,7 +92,9 @@ class WebSearchTests(TestCase):
         agents['web'] = WebAgent()
         retriever = FakeRetriever()
         etapas = []
-        workflow = IntegraCARAgentWorkflow(agents=agents, retriever=retriever)
+        workflow = IntegraCARAgentWorkflow(
+            agents=agents, retriever=retriever, skills=dict
+        )
 
         resposta = ''.join(
             workflow.run(
@@ -139,7 +145,7 @@ class WebSearchTests(TestCase):
 
         agents['web'] = WebAgent()
         workflow = IntegraCARAgentWorkflow(
-            agents=agents, retriever=FakeRetriever()
+            agents=agents, retriever=FakeRetriever(), skills=dict
         )
         finais = []
 
