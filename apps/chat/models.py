@@ -77,6 +77,41 @@ class ChunkDocumeto(models.Model):
         return self.conteudo[:50]
 
 
+class Skill(models.Model):
+    class Status(models.TextChoices):
+        GERANDO = 'gerando', 'Gerando'
+        RASCUNHO = 'rascunho', 'Rascunho'
+        ATIVA = 'ativa', 'Ativa'
+        ERRO = 'erro', 'Erro'
+
+    nome = models.SlugField(max_length=90, unique=True)
+    conteudo = models.TextField(blank=True)
+    arquivo_origem = models.FileField(
+        upload_to='skills/',
+        blank=True,
+        validators=[FileExtensionValidator(['pdf'])],
+    )
+    observacoes = models.TextField(blank=True)
+    status = models.CharField(
+        max_length=20,
+        choices=Status.choices,
+        default=Status.RASCUNHO,
+    )
+
+    criado_em = models.DateTimeField(auto_now_add=True)
+    atualizado_em = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ('nome',)
+
+    def __str__(self):
+        return self.arquivo
+
+    @property
+    def arquivo(self) -> str:
+        return f'{self.nome}.md'
+
+
 class RespostaCanonica(models.Model):
     pergunta = models.TextField()
     embedding = VectorField(null=True, blank=True)
@@ -130,6 +165,7 @@ class Mensagem(models.Model):
 
     conteudo = models.TextField(blank=True, default='')
     fontes = models.JSONField(default=list, blank=True)
+    skill = models.CharField(max_length=100, blank=True, default='')
 
     tipo = models.CharField(
         max_length=20,

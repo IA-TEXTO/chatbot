@@ -19,3 +19,11 @@ class AtualizarTipoDocumentoSchema(ModelSchema):
     class Meta:
         model = Documento
         fields = ['tipo']
+
+
+class EditarSkillSchema(Schema):
+    conteudo: str
+
+
+class AlterarStatusSkillSchema(Schema):
+    ativa: bool

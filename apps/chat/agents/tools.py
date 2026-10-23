@@ -119,7 +119,8 @@ class EvidenceContext:
             cobertura = termos_em_comum / max(len(set(termos)), 1)
             semelhanca = SequenceMatcher(None, consulta, referencia).ratio()
             pontuacao = max(
-                cobertura if termos_em_comum >= MIN_TERMOS_EM_COMUM else 0, semelhanca
+                cobertura if termos_em_comum >= MIN_TERMOS_EM_COMUM else 0,
+                semelhanca,
             )
             if pontuacao >= MIN_SEMELHANCA:
                 encontradas.append((pontuacao, item))

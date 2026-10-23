@@ -14,15 +14,17 @@ class GPT6ToolContinuationTests(TestCase):
             Message(role='user', content='Qual é a área?'),
             Message(
                 role='assistant',
-                tool_calls=[{
-                    'id': 'fc_exemplo',
-                    'call_id': 'call_exemplo',
-                    'type': 'function',
-                    'function': {
-                        'name': 'consultar_trecho',
-                        'arguments': '{"numero": 1}',
-                    },
-                }],
+                tool_calls=[
+                    {
+                        'id': 'fc_exemplo',
+                        'call_id': 'call_exemplo',
+                        'type': 'function',
+                        'function': {
+                            'name': 'consultar_trecho',
+                            'arguments': '{"numero": 1}',
+                        },
+                    }
+                ],
                 provider_data={'response_id': 'resp_exemplo'},
             ),
             Message(
@@ -37,11 +39,13 @@ class GPT6ToolContinuationTests(TestCase):
 
         assert params['previous_response_id'] == 'resp_exemplo'
         assert params['store'] is True
-        assert formatted == [{
-            'type': 'function_call_output',
-            'call_id': 'call_exemplo',
-            'output': 'Trecho do manual.',
-        }]
+        assert formatted == [
+            {
+                'type': 'function_call_output',
+                'call_id': 'call_exemplo',
+                'output': 'Trecho do manual.',
+            }
+        ]
 
     def test_outros_modelos_mantem_deteccao_original(self):
         assert not IntegraCAROpenAIResponses(

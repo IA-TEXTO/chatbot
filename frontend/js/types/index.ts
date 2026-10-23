@@ -13,6 +13,17 @@ export type Documento = {
     tipo: 'legislacao' | 'manual';
 }
 
+export type Skill = {
+    id: number;
+    nome: string;
+    arquivo: string;
+    titulo: string;
+    status: 'gerando' | 'rascunho' | 'ativa' | 'erro';
+    conteudo: string;
+    observacoes: string;
+    arquivo_origem: string | null;
+}
+
 export type Usuario = {
     id: number;
     name: string;

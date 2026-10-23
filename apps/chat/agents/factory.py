@@ -1,13 +1,14 @@
 from agno.agent import Agent
 from django.conf import settings
 
-from chat.agents.contracts import TriageDecision
+from chat.agents.contracts import SkillGerada, TriageDecision
 from chat.agents.models import IntegraCAROpenAIResponses
 from chat.agents.prompts import (
     GENERAL_INSTRUCTIONS,
     LEGAL_INSTRUCTIONS,
     MANUAL_INSTRUCTIONS,
     REVIEW_INSTRUCTIONS,
+    SKILL_WRITER_INSTRUCTIONS,
     TRIAGE_INSTRUCTIONS,
     WEB_INSTRUCTIONS,
 )
@@ -19,12 +20,12 @@ from chat.agents.tools import (
 )
 
 
-def _model() -> IntegraCAROpenAIResponses:
+def _model(*, timeout: int = 60, max_retries: int = 2):
     return IntegraCAROpenAIResponses(
         id=settings.INTEGRACAR_CHAT_MODEL,
         api_key=settings.OPENAI_API_KEY,
-        timeout=60,
-        max_retries=2,
+        timeout=timeout,
+        max_retries=max_retries,
     )
 
 
@@ -97,3 +98,17 @@ def build_agents() -> dict[str, Agent]:
             **common,
         ),
     }
+
+
+def build_skill_writer() -> Agent:
+    return Agent(
+        id='integracar-skill-writer',
+        name='Redator de skills do IntegraCAR',
+        # Abaixo do timeout de 100s do django-q para não deixar a skill
+        # presa em "gerando".
+        model=_model(timeout=90, max_retries=0),
+        instructions=SKILL_WRITER_INSTRUCTIONS,
+        output_schema=SkillGerada,
+        structured_outputs=True,
+        telemetry=False,
+    )

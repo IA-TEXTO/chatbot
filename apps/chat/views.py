@@ -1,17 +1,28 @@
 import re
 from collections.abc import Iterable
+from pathlib import Path
 
-from django.contrib.auth.decorators import login_required
+from django.contrib.auth.decorators import login_required, user_passes_test
+from django.db import transaction
 from django.http import HttpRequest
 from django.shortcuts import get_object_or_404, redirect
 from django.utils import timezone
 from django.utils.decorators import method_decorator
 from django.views import View
 from django.views.decorators.csrf import csrf_exempt
+from django_q.tasks import async_task
 from inertia import render, share
 
-from chat.forms import ImportarDocumentosForm
-from chat.models import Conversa, Documento, Mensagem, StatusDocumento
+from chat.agents.skills import serializar_skill
+from chat.forms import ImportarDocumentosForm, ImportarSkillForm
+from chat.models import (
+    Conversa,
+    Documento,
+    Mensagem,
+    Skill,
+    StatusDocumento,
+)
+from chat.tasks import gerar_skill_de_pdf, nome_skill_disponivel
 
 
 def montar_arvore_mensagens(
@@ -23,6 +34,7 @@ def montar_arvore_mensagens(
             'id': mensagem.id,
             'conteudo': mensagem.conteudo,
             'fontes': getattr(mensagem, 'fontes', []),
+            'skill': getattr(mensagem, 'skill', ''),
             'tipo': mensagem.tipo,
             'mensagem_pai': mensagem.mensagem_pai_id,
             'mensagens_filhas': [],
@@ -155,3 +167,49 @@ class ExcluirConversaView(View):
             return redirect('index')
 
         return redirect(referer or 'index')
+
+
+apenas_staff = [
+    login_required,
+    user_passes_test(lambda usuario: usuario.is_staff),
+]
+
+
+@method_decorator([*apenas_staff, csrf_exempt], name='dispatch')
+class SkillsView(View):
+    template_name = 'Chat/Skills'
+
+    def get(self, request: HttpRequest, erro_importacao: str = ''):
+        return render(
+            request,
+            self.template_name,
+            {
+                'skills': [
+                    serializar_skill(skill) for skill in Skill.objects.all()
+                ],
+                'erro_importacao': erro_importacao,
+            },
+        )
+
+    def post(self, request: HttpRequest):
+        form = ImportarSkillForm(request.POST, request.FILES)
+        if not form.is_valid():
+            return self.get(request, 'Envie um arquivo PDF.')
+
+        arquivo = form.cleaned_data['arquivo']
+        skill = Skill.objects.create(
+            nome=nome_skill_disponivel(Path(arquivo.name).stem),
+            arquivo_origem=arquivo,
+            status=Skill.Status.GERANDO,
+        )
+        transaction.on_commit(
+            lambda: async_task(gerar_skill_de_pdf, skill.id)
+        )
+        return redirect('skills')
+
+
+@method_decorator([*apenas_staff, csrf_exempt], name='dispatch')
+class ExcluirSkillView(View):
+    def post(self, request: HttpRequest, id_skill: int):
+        get_object_or_404(Skill, id=id_skill).delete()
+        return redirect('skills')

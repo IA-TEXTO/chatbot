@@ -18,6 +18,33 @@ class TriageDecision(BaseModel):
     needs_clarification: bool = False
     needs_web: bool = False
     clarification_question: str | None = None
+    skill: str | None = Field(
+        default=None,
+        description='Nome da skill do catálogo, somente quando se aplica.',
+    )
     rationale: str = Field(
         description='Justificativa curta, usada apenas para observabilidade.',
+    )
+
+
+class SkillGerada(BaseModel):
+    nome: str = Field(
+        description='Identificador curto em minúsculas, com hífens.',
+    )
+    titulo: str
+    documento: str = Field(
+        description='Nome oficial do documento, como aparece nele.',
+    )
+    descricao: str = Field(
+        description='Quando a skill se aplica e quando não se aplica.',
+    )
+    rotas: list[Route]
+    linha_de_raciocinio: str = Field(
+        description='Lista numerada em markdown com os passos de raciocínio.',
+    )
+    referencia: str = Field(
+        description='Conteúdo do documento reorganizado em markdown.',
+    )
+    pontos_a_revisar: list[str] = Field(
+        description='Inconsistências ou ambiguidades para o curador conferir.',
     )

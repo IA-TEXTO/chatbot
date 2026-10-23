@@ -18,4 +18,10 @@ urlpatterns = [
         views.ExcluirDocumentoView.as_view(),
         name='excluir_documento',
     ),
+    path('skills/', views.SkillsView.as_view(), name='skills'),
+    path(
+        'skills/<int:id_skill>/excluir/',
+        views.ExcluirSkillView.as_view(),
+        name='excluir_skill',
+    ),
 ]

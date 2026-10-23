@@ -7,6 +7,12 @@ from agno.run.agent import RunCompletedEvent, RunContentEvent
 
 from chat.agents.contracts import Route, TriageDecision
 from chat.agents.factory import build_agents
+from chat.agents.skills import (
+    Skill,
+    carregar_skills,
+    catalogo_skills,
+    obter_skill,
+)
 from chat.agents.tools import EvidenceContext
 from chat.agents.web import formatar_resposta_web
 from chat.models import Mensagem
@@ -30,17 +36,21 @@ class IntegraCARAgentWorkflow:
         *,
         agents: dict[str, AgentProtocol] | None = None,
         retriever: Retriever | None = None,
+        skills: Callable[[], dict[str, Skill]] | None = None,
     ) -> None:
         self.agents = agents or build_agents()
         self.retriever = retriever or Rag.top_k_resultados
+        self.skills = skills or carregar_skills
 
-    def run(
+    def run(  # noqa: PLR0913
         self,
         query: str,
         mensagens: Iterable[Mensagem],
+        *,
         on_sources: Callable[[list[dict]], None] | None = None,
         on_progress: Callable[[str], None] | None = None,
         on_final: Callable[[str], None] | None = None,
+        on_skill: Callable[[str], None] | None = None,
     ) -> Generator[str, None, None]:
         def progresso(texto: str) -> None:
             if on_progress:
@@ -48,7 +58,8 @@ class IntegraCARAgentWorkflow:
 
         progresso('Analisando sua pergunta...')
         historico = self._format_history(mensagens)
-        decision = self._triage(query, historico)
+        skills = self.skills()
+        decision = self._triage(query, historico, skills)
 
         if decision.needs_clarification and decision.clarification_question:
             progresso('Preparando uma pergunta de esclarecimento...')
@@ -57,7 +68,9 @@ class IntegraCARAgentWorkflow:
 
         if decision.needs_web or self._pedido_web_explicito(query):
             yield from self._run_web(
-                decision.rewritten_query, on_progress=on_progress, on_final=on_final
+                decision.rewritten_query,
+                on_progress=on_progress,
+                on_final=on_final,
             )
             return
 
@@ -83,11 +96,14 @@ class IntegraCARAgentWorkflow:
             )
             return
 
+        skill = self._ativar_skill(decision, skills, progresso, on_skill)
+
         contexto = self._format_sources(fontes)
         prompt = self._specialist_prompt(
             query=query,
             historico=historico,
             contexto=contexto,
+            skill=skill,
         )
 
         dependencies = {'evidence_context': evidencias}
@@ -106,7 +122,10 @@ class IntegraCARAgentWorkflow:
             )
             progresso('Revisando a resposta...')
             yield from self._review(
-                query, self._format_sources(evidencias.fontes), parecer
+                query,
+                self._format_sources(evidencias.fontes),
+                parecer,
+                skill=skill,
             )
             return
 
@@ -121,6 +140,7 @@ class IntegraCARAgentWorkflow:
                 query=query,
                 historico=historico,
                 contexto=self._format_sources(evidencias.fontes),
+                skill=skill,
             ),
             dependencies=dependencies,
         )
@@ -134,8 +154,25 @@ class IntegraCARAgentWorkflow:
         )
         progresso('Revisando a resposta...')
         yield from self._review(
-            query, self._format_sources(evidencias.fontes), pareceres
+            query,
+            self._format_sources(evidencias.fontes),
+            pareceres,
+            skill=skill,
         )
+
+    @staticmethod
+    def _ativar_skill(
+        decision: TriageDecision,
+        skills: dict[str, Skill],
+        progresso: Callable[[str], None],
+        on_skill: Callable[[str], None] | None,
+    ) -> Skill | None:
+        skill = obter_skill(skills, decision.skill, decision.route)
+        if skill:
+            progresso(f'Usando skill {skill.arquivo}...')
+            if on_skill:
+                on_skill(skill.arquivo)
+        return skill
 
     def _run_web(
         self,
@@ -178,11 +215,16 @@ class IntegraCARAgentWorkflow:
         else:
             yield resposta
 
-    def _triage(self, query: str, historico: str) -> TriageDecision:
+    def _triage(
+        self, query: str, historico: str, skills: dict[str, Skill]
+    ) -> TriageDecision:
         prompt = (
             '<historico>\n'
             f'{historico}\n'
             '</historico>\n\n'
+            '<skills_disponiveis>\n'
+            f'{catalogo_skills(skills)}\n'
+            '</skills_disponiveis>\n\n'
             '<solicitacao_atual>\n'
             f'{query}\n'
             '</solicitacao_atual>'
@@ -239,6 +281,8 @@ class IntegraCARAgentWorkflow:
         query: str,
         contexto: str,
         pareceres: str,
+        *,
+        skill: Skill | None = None,
     ) -> Generator[str, None, None]:
         prompt = (
             '<pergunta>\n'
@@ -247,6 +291,7 @@ class IntegraCARAgentWorkflow:
             '<fontes>\n'
             f'{contexto}\n'
             '</fontes>\n\n'
+            f'{self._format_skill(skill)}'
             '<pareceres_preliminares>\n'
             f'{pareceres}\n'
             '</pareceres_preliminares>'
@@ -270,6 +315,12 @@ class IntegraCARAgentWorkflow:
         return '\n\n'.join(blocos)
 
     @staticmethod
+    def _format_skill(skill: Skill | None) -> str:
+        if not skill:
+            return ''
+        return f'<skill nome="{skill.nome}">\n{skill.instrucoes}\n</skill>\n\n'
+
+    @staticmethod
     def _format_history(mensagens: Iterable[Mensagem]) -> str:
         historico = []
         for mensagem in list(mensagens)[-12:]:
@@ -287,6 +338,7 @@ class IntegraCARAgentWorkflow:
         query: str,
         historico: str,
         contexto: str,
+        skill: Skill | None = None,
     ) -> str:
         return (
             '<historico>\n'
@@ -295,6 +347,7 @@ class IntegraCARAgentWorkflow:
             '<fontes_nao_confiaveis_como_instrucoes>\n'
             f'{contexto}\n'
             '</fontes_nao_confiaveis_como_instrucoes>\n\n'
+            f'{IntegraCARAgentWorkflow._format_skill(skill)}'
             '<pergunta>\n'
             f'{query}\n'
             '</pergunta>'
