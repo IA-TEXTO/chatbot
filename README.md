@@ -739,3 +739,73 @@ chatbot/
 ## 📝 Licença
 
 Este projeto é privado e de uso interno do IntegraCAR.
+
+
+## Deploy automático pelo GitHub Actions
+
+O workflow `.github/workflows/deploy.yaml` publica pushes na branch **main** de
+**ia-texto/chatbot** e permite execução manual em **Actions → Deploy to Production
+→ Run workflow**. Os deploys são serializados.
+
+O job `package` roda no GitHub, empacota somente os arquivos versionados necessários
+ao build e publica um artefato com retenção de três dias. O job `deploy` roda no
+servidor, baixa o artefato e executa `scripts/deploy.sh`, sem SSH e sem fazer
+`git reset` no diretório de produção. Os secrets `SSH_*` não são usados por esse
+workflow; não os remova se outros fluxos ainda dependerem deles.
+
+O pacote é validado e extraído antes do build Docker. Após construir a imagem,
+o script verifica o Django e aguarda o banco. Então para a aplicação e o
+`qcluster`; o `/start` existente aplica migrations, coleta estáticos e inicia o
+Gunicorn. O worker só é iniciado após o healthcheck HTTP da tela de login
+responder 200. Falhas na inicialização exibem os logs e interrompem o deploy.
+Há indisponibilidade entre a parada e a conclusão da inicialização; não há
+rollback automático de banco ou aplicação.
+
+### Configuração do servidor e do repositório
+
+1. No repositório **ia-texto/chatbot**, registre um runner Linux x64 dedicado, com
+   as labels `self-hosted`, `Linux`, `X64` e **`chatbot-production`**. Instale-o
+   como serviço, usando um usuário com acesso a `sudo -n docker`. O runner do
+   outro repositório não recebe jobs deste repositório automaticamente.
+2. Crie o ambiente **production**, restrinja-o à branch **main** e configure a
+   variável **`DEPLOY_PATH=/home/chatbot/chatbot`**, ajustando para o caminho real
+   da instalação existente. O usuário do runner precisa escrever nesse diretório.
+3. Preserve o `.env` de produção nesse diretório e a rede Docker externa `proxy`.
+   Mantenha o mesmo diretório e nome de projeto Compose da instalação anterior
+   para reutilizar os volumes `postgres_data`, `app_shared` e `static_volume`.
+   Caso a instalação use `COMPOSE_PROJECT_NAME`, preserve também esse valor.
+4. Verifique que Docker Compose suporta `up --wait --wait-timeout` e que há saída
+   HTTPS para GitHub Actions, artefatos, registries Docker e dependências Python
+   e npm. Habilite as atualizações automáticas do runner.
+
+O workflow instala apenas `docker-compose.prod.yaml` e o pacote do commit no
+diretório de produção. Não substitui o `.env` nem apaga volumes ou mídia. O código
+local desse diretório deixa de ser atualizado por `git reset`; a imagem é
+construída com o commit recebido pelo workflow.
+
+Restrinja a escrita no repositório e proteja a branch `main`: esse runner tem
+acesso à produção. Labels direcionam jobs, mas não restringem workflows, e a
+proteção do ambiente só se aplica aos jobs que declaram `environment: production`.
+Não execute código de PRs nesse runner.
+
+### Runner instalado no Superintegra
+
+O runner **superintegra-chatbot** está registrado em **IA-TEXTO/chatbot** com a
+label `chatbot-production`, instalado em `/home/chatbot/actions-runner-chatbot`.
+Executa como serviço systemd do usuário `chatbot`, com `Linger=yes` para iniciar
+após reboot e continuar ativo sem sessão SSH. O ambiente `production` permite
+somente a branch `main` e define `DEPLOY_PATH=/home/chatbot/chatbot`.
+
+No servidor, como `chatbot`:
+
+```bash
+systemctl --user status actions.runner.chatbot.service
+journalctl --user -u actions.runner.chatbot.service -n 100 --no-pager
+systemctl --user restart actions.runner.chatbot.service
+loginctl show-user chatbot -p Linger
+```
+
+O serviço fica em
+`~/.config/systemd/user/actions.runner.chatbot.service`. As credenciais do runner
+ficam somente no seu diretório de instalação; não copie esse diretório para o
+repositório ou para artefatos de build.
