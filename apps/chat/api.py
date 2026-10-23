@@ -22,6 +22,7 @@ from chat.schemas import (
     ChatSchema,
     CurtirMensagemSchema,
     EditarSkillSchema,
+    RenomearConversaSchema,
 )
 
 logger = logging.getLogger(__name__)
@@ -365,3 +366,19 @@ def alterar_status_skill(
     )
     skill.save(update_fields=['status', 'atualizado_em'])
     return serializar_skill(skill)
+
+
+@chat_router.patch('/conversas/{id_conversa}')
+def renomear_conversa(
+    request: HttpRequest,
+    id_conversa: int,
+    payload: RenomearConversaSchema,
+):
+    if not request.user.is_authenticated:
+        raise HttpError(403, 'Entre na sua conta para organizar as conversas.')
+    conversa = get_object_or_404(
+        Conversa, id=id_conversa, usuario=request.user
+    )
+    conversa.nome = payload.nome
+    conversa.save(update_fields=['nome'])
+    return {'id': conversa.id, 'nome': conversa.nome}

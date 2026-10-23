@@ -3,8 +3,9 @@ from collections.abc import Iterable
 from pathlib import Path
 
 from django.contrib.auth.decorators import login_required, user_passes_test
+from django.core.exceptions import ValidationError
 from django.db import transaction
-from django.http import HttpRequest
+from django.http import HttpRequest, HttpResponse, HttpResponseBadRequest
 from django.shortcuts import get_object_or_404, redirect
 from django.utils import timezone
 from django.utils.decorators import method_decorator
@@ -14,6 +15,7 @@ from django_q.tasks import async_task
 from inertia import render, share
 
 from chat.agents.skills import serializar_skill
+from chat.export import exportar_markdown, selecionar_ramificacao
 from chat.forms import ImportarDocumentosForm, ImportarSkillForm
 from chat.models import (
     Conversa,
@@ -45,9 +47,9 @@ def montar_arvore_mensagens(
 
     for mensagem in mensagens_ordenadas:
         if mensagem.mensagem_pai_id in map_mensagens:
-            map_mensagens[mensagem.mensagem_pai_id][
-                'mensagens_filhas'
-            ].append(mensagem.id)
+            map_mensagens[mensagem.mensagem_pai_id]['mensagens_filhas'].append(
+                mensagem.id
+            )
 
     return map_mensagens
 
@@ -202,9 +204,7 @@ class SkillsView(View):
             arquivo_origem=arquivo,
             status=Skill.Status.GERANDO,
         )
-        transaction.on_commit(
-            lambda: async_task(gerar_skill_de_pdf, skill.id)
-        )
+        transaction.on_commit(lambda: async_task(gerar_skill_de_pdf, skill.id))
         return redirect('skills')
 
 
@@ -213,3 +213,29 @@ class ExcluirSkillView(View):
     def post(self, request: HttpRequest, id_skill: int):
         get_object_or_404(Skill, id=id_skill).delete()
         return redirect('skills')
+
+
+@method_decorator(login_required, name='dispatch')
+class ExportarConversaView(View):
+    def get(self, request: HttpRequest, id_conversa: int):
+        conversa = get_object_or_404(
+            Conversa, id=id_conversa, usuario=request.user
+        )
+        try:
+            id_ultima = int(request.GET.get('ultima_mensagem', ''))
+            mensagens = selecionar_ramificacao(
+                conversa.mensagens.order_by('criado_em', 'id'), id_ultima
+            )
+        except (ValueError, ValidationError):
+            return HttpResponseBadRequest(
+                'Selecione uma versão válida da conversa.'
+            )
+        resposta = HttpResponse(
+            exportar_markdown(conversa, mensagens),
+            content_type='text/markdown; charset=utf-8',
+        )
+        resposta['Content-Disposition'] = (
+            f'attachment; filename="integracar-conversa-{conversa.id}.md"'
+        )
+        resposta['Cache-Control'] = 'private, no-store'
+        return resposta

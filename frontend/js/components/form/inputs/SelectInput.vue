@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { FormField } from "@/types/djangoForm";
-const props = defineProps<{ field: FormField }>();
+defineProps<{ field: FormField }>();
 </script>
 
 <template>

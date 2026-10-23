@@ -10,6 +10,23 @@ services:
     env_file:
       - ./.env
     command: /start
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - |
+          import http.client
+          connection = http.client.HTTPConnection("127.0.0.1", 8000, timeout=3)
+          connection.request("GET", "/contas/entrar/", headers={
+              "Host": "chatbotintegracar.online",
+              "X-Forwarded-Proto": "https",
+          })
+          raise SystemExit(0 if connection.getresponse().status == 200 else 1)
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
     restart: unless-stopped
     depends_on:
       db:

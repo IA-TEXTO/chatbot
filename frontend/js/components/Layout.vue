@@ -22,6 +22,53 @@ const isActive = (href: string): boolean => {
     }
 };
 
+const buscaConversa = ref('');
+const nomesConversas = ref<Record<number, string>>({});
+function nomeConversa(conversa: Conversa) {
+    return nomesConversas.value[conversa.id] ?? conversa.nome;
+}
+function normalizar(texto: string) {
+    return texto.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLocaleLowerCase('pt-BR');
+}
+const conversasFiltradas = computed(() => (page.props.conversas ?? []).filter(
+    conversa => normalizar(nomeConversa(conversa)).includes(normalizar(buscaConversa.value.trim()))
+));
+const renameModal = ref<HTMLDialogElement | null>(null);
+const renameInput = ref<HTMLInputElement | null>(null);
+const conversaParaRenomear = ref<Conversa | null>(null);
+const novoNome = ref('');
+const erroRenomear = ref('');
+const salvandoNome = ref(false);
+
+function abrirRenomear(conversa: Conversa) {
+    conversaParaRenomear.value = conversa;
+    novoNome.value = nomeConversa(conversa);
+    erroRenomear.value = '';
+    renameModal.value?.showModal();
+    setTimeout(() => renameInput.value?.select(), 0);
+}
+
+async function salvarNome() {
+    if (!conversaParaRenomear.value || !novoNome.value.trim() || salvandoNome.value) return;
+    salvandoNome.value = true;
+    erroRenomear.value = '';
+    try {
+        const response = await fetch(`/api/conversas/${conversaParaRenomear.value.id}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ nome: novoNome.value.trim() }),
+        });
+        if (!response.ok) throw new Error('Falha ao salvar');
+        const conversa = await response.json();
+        nomesConversas.value[conversa.id] = conversa.nome;
+        renameModal.value?.close();
+    } catch {
+        erroRenomear.value = 'Não foi possível salvar o nome. Tente novamente.';
+    } finally {
+        salvandoNome.value = false;
+    }
+}
+
 const deleteModal = ref<HTMLDialogElement | null>(null);
 const conversaParaExcluir = ref<Conversa | null>(null);
 const sidebarToggle = ref<HTMLInputElement | null>(null);
@@ -52,7 +99,7 @@ onUnmounted(() => {
 const abrirModalExcluir = (conversa: Conversa, event: Event) => {
     event.preventDefault();
     event.stopPropagation();
-    conversaParaExcluir.value = conversa;
+    conversaParaExcluir.value = { ...conversa, nome: nomeConversa(conversa) };
     deleteModal.value?.showModal();
     setTimeout(() => deleteConfirmButton.value?.focus(), 0);
 };
@@ -153,22 +200,37 @@ function fecharSidebarEmTelaPequena() {
 
                 <hr class="my-2">
                 <div class="min-h-0 flex-1 overflow-y-auto overscroll-contain is-drawer-close:hidden">
+                    <div class="px-3 py-2">
+                        <label for="buscar-conversas" class="mb-2 block text-xs font-semibold">Histórico de consultas</label>
+                        <input id="buscar-conversas" v-model="buscaConversa" type="search"
+                            placeholder="Buscar pelo nome…" class="input input-sm w-full bg-neutral text-neutral-content"
+                            @keydown.esc="buscaConversa = ''" />
+                        <p v-if="buscaConversa" class="mt-2 text-xs" role="status">
+                            {{ conversasFiltradas.length }} conversa(s) encontrada(s)
+                        </p>
+                        <p v-if="!page.props.conversas?.length" class="mt-2 text-xs opacity-70">Suas consultas aparecerão aqui.</p>
+                    </div>
                     <ul class="menu w-full gap-1 px-2">
-                        <li class="is-drawer-close:hidden" v-for="conversa in page.props.conversas" :key="conversa.id">
+                        <li class="is-drawer-close:hidden" v-for="conversa in conversasFiltradas" :key="conversa.id">
+                            <div class="group flex items-center gap-1 p-0">
                             <Link :href="page.props.urls['conversa'].replace('%(id_conversa)s', conversa.id.toString())"
-                                class="group flex items-center justify-between gap-2 rounded-xl border border-transparent px-2 py-1.5 text-nowrap hover:bg-secondary/80 focus-visible:border-base-100/70"
+                                class="min-w-0 flex-1 flex items-center justify-between gap-2 rounded-xl border border-transparent px-2 py-1.5 text-nowrap hover:bg-secondary/80 focus-visible:border-base-100/70"
                                 :class="{ 'bg-accent': isActive(page.props.urls['conversa'].replace('%(id_conversa)s', conversa.id.toString())) }"
                                 @click="fecharSidebarEmTelaPequena">
-                                <span class="truncate is-drawer-close:hidden">{{ conversa.nome }}</span>
+                                <span class="truncate is-drawer-close:hidden">{{ nomeConversa(conversa) }}</span>
                                 <i class="bi bi-chat-left-text is-drawer-open:hidden"></i>
-                                <button
-                                    @click="abrirModalExcluir(conversa, $event)"
-                                    class="btn btn-ghost btn-xs btn-circle opacity-0 transition-opacity duration-150 pointer-events-none group-hover:opacity-90 group-hover:pointer-events-auto"
-                                    aria-label="Excluir conversa"
-                                    title="Excluir conversa">
-                                    <i class="bi bi-trash-fill"></i>
-                                </button>
                             </Link>
+                            <button type="button" class="btn btn-ghost btn-xs btn-square"
+                                :aria-label="`Renomear conversa ${nomeConversa(conversa)}`" title="Renomear conversa"
+                                @click="abrirRenomear(conversa)">
+                                <i class="bi bi-pencil"></i>
+                            </button>
+                            <button type="button" class="btn btn-ghost btn-xs btn-square"
+                                :aria-label="`Excluir conversa ${nomeConversa(conversa)}`" title="Excluir conversa"
+                                @click="abrirModalExcluir(conversa, $event)">
+                                <i class="bi bi-trash"></i>
+                            </button>
+                            </div>
                         </li>
                     </ul>
                 </div>
@@ -197,6 +259,23 @@ function fecharSidebarEmTelaPequena() {
             </div>
         </div>
     </div>
+
+    <dialog ref="renameModal" class="modal" aria-labelledby="renomear-titulo" @cancel="salvandoNome && $event.preventDefault()">
+        <form class="modal-box" @submit.prevent="salvarNome">
+            <h3 id="renomear-titulo" class="text-lg font-bold">Renomear conversa</h3>
+            <label for="nome-conversa" class="mt-4 mb-2 block">Nome da consulta</label>
+            <input id="nome-conversa" ref="renameInput" v-model="novoNome" maxlength="50" required
+                :disabled="salvandoNome" class="input w-full" />
+            <p class="mt-1 text-xs opacity-70">{{ novoNome.length }}/50 caracteres</p>
+            <p v-if="erroRenomear" role="alert" class="mt-2 text-error">{{ erroRenomear }}</p>
+            <div class="modal-action">
+                <button type="button" class="btn" :disabled="salvandoNome" @click="renameModal?.close()">Cancelar</button>
+                <button type="submit" class="btn btn-primary" :disabled="!novoNome.trim() || salvandoNome">
+                    {{ salvandoNome ? 'Salvando…' : 'Salvar nome' }}
+                </button>
+            </div>
+        </form>
+    </dialog>
 
     <!-- Modal de confirmação de exclusão -->
     <dialog ref="deleteModal" class="modal">

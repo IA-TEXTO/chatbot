@@ -1,4 +1,5 @@
 from ninja import ModelSchema, Schema
+from pydantic import Field, field_validator
 
 from chat.models import Documento
 
@@ -27,3 +28,12 @@ class EditarSkillSchema(Schema):
 
 class AlterarStatusSkillSchema(Schema):
     ativa: bool
+
+
+class RenomearConversaSchema(Schema):
+    nome: str = Field(min_length=1, max_length=50)
+
+    @field_validator('nome', mode='before')
+    @classmethod
+    def limpar_nome(cls, valor):
+        return valor.strip() if isinstance(valor, str) else valor

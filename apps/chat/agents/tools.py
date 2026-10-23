@@ -31,7 +31,9 @@ class EvidenceContext:
     on_progress: Callable[[str], None] | None = None
     buscas_adicionais: int = 0
     consultas_canonicas: int = 0
+    numeros_memoria: set[int] = field(default_factory=set)
     _indices: set[tuple[int, str]] = field(default_factory=set)
+    consultas_realizadas: set[str] = field(default_factory=set)
 
     def __post_init__(self):
         self._indices = {(f.documento_id, f.conteudo) for f in self.fontes}
@@ -54,9 +56,19 @@ class EvidenceContext:
         pergunta = pergunta.strip()[:300]
         if not pergunta:
             return {'erro': 'Informe o assunto da busca.'}
+        chave_consulta = normalize(pergunta)
+        if not chave_consulta:
+            return {'erro': 'Informe termos válidos para a busca.'}
+        if chave_consulta in self.consultas_realizadas:
+            return {
+                'erro': 'Esta busca já foi realizada. Use outro aspecto da pergunta.'
+            }
+        if len(self.fontes) >= MAX_FONTES:
+            return {'erro': 'Limite de fontes atingido nesta resposta.'}
         if self.buscas_adicionais >= MAX_BUSCAS_ADICIONAIS:
             return {'erro': 'Limite de buscas adicionais atingido.'}
         self.buscas_adicionais += 1
+        self.consultas_realizadas.add(chave_consulta)
         if self.on_progress:
             self.on_progress(
                 'Fazendo uma busca complementar nos documentos...'

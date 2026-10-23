@@ -321,6 +321,12 @@ async function editarMensagem(idMensagem: number, novoConteudo: string) {
     );
 }
 
+function exportarConversa() {
+    const idUltima = mensagemRef.value?.obterIdUltimaMensagem();
+    if (!idConversa.value || !idUltima || enviandoMensagem.value) return;
+    window.location.assign(`/c/${idConversa.value}/exportar/?ultima_mensagem=${idUltima}`);
+}
+
 function handlePaste(e: ClipboardEvent) {
     e.preventDefault();
     const text = e.clipboardData?.getData('text/plain') || '';
@@ -365,6 +371,13 @@ onUnmounted(() => {
 
 <template>
     <div class="mx-auto flex h-full w-full max-w-5xl flex-1 flex-col px-2 pb-2 pt-3 sm:px-4 sm:pb-4">
+        <div v-if="temMensagens && page.props.user" class="mx-auto mb-3 flex w-full max-w-3xl items-center justify-between gap-3 border-b border-base-content/10 pb-2">
+            <span class="text-xs text-base-content/65">Salve sua consulta com os trechos das fontes.</span>
+            <button type="button" class="btn btn-ghost btn-sm shrink-0" :disabled="enviandoMensagem || !idConversa"
+                title="Baixar a versão selecionada da conversa em Markdown" @click="exportarConversa">
+                <i class="bi bi-download"></i> Exportar consulta
+            </button>
+        </div>
         <div ref="containerMensagens" class="min-h-0 flex-1 overflow-y-auto pr-1 chat-scroll-area" aria-live="polite">
             <div class="mx-auto w-full max-w-3xl space-y-4 pb-4">
                 <div v-if="!temMensagens"

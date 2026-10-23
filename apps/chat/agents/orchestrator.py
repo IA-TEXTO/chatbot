@@ -7,16 +7,21 @@ from agno.run.agent import RunCompletedEvent, RunContentEvent
 
 from chat.agents.contracts import Route, TriageDecision
 from chat.agents.factory import build_agents
+from chat.agents.memory import (
+    EvidenceMemory,
+    chave_fonte,
+    remap_history_citations,
+)
 from chat.agents.skills import (
     Skill,
     carregar_skills,
     catalogo_skills,
     obter_skill,
 )
-from chat.agents.tools import EvidenceContext
+from chat.agents.tools import MAX_BUSCAS_ADICIONAIS, EvidenceContext
 from chat.agents.web import formatar_resposta_web
 from chat.models import Mensagem
-from chat.rag import Rag, RetrievedChunk
+from chat.rag import Rag, RetrievedChunk, normalize
 
 logger = logging.getLogger(__name__)
 
@@ -57,9 +62,13 @@ class IntegraCARAgentWorkflow:
                 on_progress(texto)
 
         progresso('Analisando sua pergunta...')
+        mensagens = list(mensagens)[-12:]
+        memoria = EvidenceMemory.from_messages(mensagens)
         historico = self._format_history(mensagens)
         skills = self.skills()
-        decision = self._triage(query, historico, skills)
+        decision = self._triage(
+            query, historico + memoria.format_for_triage(), skills
+        )
 
         if decision.needs_clarification and decision.clarification_question:
             progresso('Preparando uma pergunta de esclarecimento...')
@@ -81,14 +90,14 @@ class IntegraCARAgentWorkflow:
             return
 
         progresso('Buscando fontes nos documentos...')
-        fontes = self.retriever(decision.rewritten_query, 12)
-        evidencias = EvidenceContext(
-            fontes=list(fontes),
-            retriever=self.retriever,
+        evidencias = self._retrieve_evidence(
+            query,
+            decision,
+            memoria=memoria,
             on_sources=on_sources,
             on_progress=on_progress,
         )
-        if not fontes:
+        if not evidencias.fontes:
             yield (
                 'Não encontrei informações suficientes nos documentos '
                 'disponíveis para responder com segurança. Informe mais detalhes '
@@ -98,7 +107,8 @@ class IntegraCARAgentWorkflow:
 
         skill = self._ativar_skill(decision, skills, progresso, on_skill)
 
-        contexto = self._format_sources(fontes)
+        historico = self._format_history(mensagens, fontes=evidencias.fontes)
+        contexto = self._format_evidence(evidencias)
         prompt = self._specialist_prompt(
             query=query,
             historico=historico,
@@ -123,8 +133,9 @@ class IntegraCARAgentWorkflow:
             progresso('Revisando a resposta...')
             yield from self._review(
                 query,
-                self._format_sources(evidencias.fontes),
+                self._format_evidence(evidencias),
                 parecer,
+                historico,
                 skill=skill,
             )
             return
@@ -139,7 +150,7 @@ class IntegraCARAgentWorkflow:
             self._specialist_prompt(
                 query=query,
                 historico=historico,
-                contexto=self._format_sources(evidencias.fontes),
+                contexto=self._format_evidence(evidencias),
                 skill=skill,
             ),
             dependencies=dependencies,
@@ -155,8 +166,9 @@ class IntegraCARAgentWorkflow:
         progresso('Revisando a resposta...')
         yield from self._review(
             query,
-            self._format_sources(evidencias.fontes),
+            self._format_evidence(evidencias),
             pareceres,
+            historico,
             skill=skill,
         )
 
@@ -173,6 +185,70 @@ class IntegraCARAgentWorkflow:
             if on_skill:
                 on_skill(skill.arquivo)
         return skill
+
+    def _retrieve_evidence(
+        self,
+        query: str,
+        decision: TriageDecision,
+        *,
+        memoria: EvidenceMemory,
+        on_sources: Callable[[list[dict]], None] | None,
+        on_progress: Callable[[str], None] | None,
+    ) -> EvidenceContext:
+        fontes = list(self.retriever(decision.rewritten_query, 12))
+        busca_inicial_vazia = not fontes
+        chaves = {chave_fonte(fonte) for fonte in fontes}
+        numeros_memoria = set()
+        for fonte in memoria.fontes:
+            if chave_fonte(fonte) not in chaves:
+                fontes.append(fonte)
+                numeros_memoria.add(len(fontes))
+                chaves.add(chave_fonte(fonte))
+        evidencias = EvidenceContext(
+            fontes=fontes,
+            numeros_memoria=numeros_memoria,
+            retriever=self.retriever,
+            on_sources=on_sources,
+            on_progress=on_progress,
+            consultas_realizadas={normalize(decision.rewritten_query[:300])},
+        )
+        for busca in decision.complementary_queries:
+            evidencias.buscar(busca)
+        if (
+            (
+                not evidencias.fontes
+                or (busca_inicial_vazia and not decision.complementary_queries)
+            )
+            and evidencias.buscas_adicionais < MAX_BUSCAS_ADICIONAIS
+            and normalize(query[:300]) not in evidencias.consultas_realizadas
+        ):
+            # A reescrita pode perder um termo específico usado pelo usuário.
+            evidencias.buscar(query)
+        logger.info(
+            'Recuperação documental: %d fontes, %d buscas complementares.',
+            len(evidencias.fontes),
+            evidencias.buscas_adicionais,
+        )
+        return evidencias
+
+    @classmethod
+    def _format_evidence(cls, evidencias: EvidenceContext) -> str:
+        return (
+            cls._format_sources(evidencias.fontes)
+            + '\n\nFontes reutilizadas de respostas anteriores (snapshots): '
+            + (
+                ', '.join(
+                    f'[Fonte {n}]' for n in sorted(evidencias.numeros_memoria)
+                )
+                or 'nenhuma'
+            )
+            + '. Confira se sustentam a pergunta atual e não presuma atualização.\n'
+            + '\n\n<orcamento_de_busca>\n'
+            f'Buscas complementares já utilizadas: {evidencias.buscas_adicionais}'
+            f'/{MAX_BUSCAS_ADICIONAIS}. Não repita buscas já feitas: '
+            f'{", ".join(sorted(evidencias.consultas_realizadas))}.\n'
+            '</orcamento_de_busca>'
+        )
 
     def _run_web(
         self,
@@ -281,10 +357,14 @@ class IntegraCARAgentWorkflow:
         query: str,
         contexto: str,
         pareceres: str,
+        historico: str = '',
         *,
         skill: Skill | None = None,
     ) -> Generator[str, None, None]:
         prompt = (
+            '<historico>\n'
+            f'{historico}\n'
+            '</historico>\n\n'
             '<pergunta>\n'
             f'{query}\n'
             '</pergunta>\n\n'
@@ -321,7 +401,10 @@ class IntegraCARAgentWorkflow:
         return f'<skill nome="{skill.nome}">\n{skill.instrucoes}\n</skill>\n\n'
 
     @staticmethod
-    def _format_history(mensagens: Iterable[Mensagem]) -> str:
+    def _format_history(
+        mensagens: Iterable[Mensagem],
+        fontes: list[RetrievedChunk] | None = None,
+    ) -> str:
         historico = []
         for mensagem in list(mensagens)[-12:]:
             papel = (
@@ -329,7 +412,13 @@ class IntegraCARAgentWorkflow:
                 if mensagem.tipo == Mensagem.OpcoesTipo.USUARIO
                 else 'Assistente'
             )
-            historico.append(f'{papel}: {mensagem.conteudo}')
+            conteudo = (
+                remap_history_citations(mensagem, fontes)
+                if fontes is not None
+                and mensagem.tipo == Mensagem.OpcoesTipo.ASSISTENTE
+                else mensagem.conteudo
+            )
+            historico.append(f'{papel}: {conteudo}')
         return '\n'.join(historico) or 'Sem mensagens anteriores.'
 
     @staticmethod

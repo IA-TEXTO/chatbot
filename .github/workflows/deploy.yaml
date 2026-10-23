@@ -6,34 +6,70 @@ on:
       - main
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 concurrency:
-  group: deploy-prod
+  group: chatbot-production
   cancel-in-progress: false
 
 jobs:
-  deploy:
+  package:
+    if: github.repository == 'ia-texto/chatbot' && github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      DEPLOY_SHA: ${{ github.sha }}
     steps:
-      - name: Checkout (metadata only)
+      - name: Checkout
         uses: actions/checkout@v4
         with:
-          fetch-depth: 1
+          persist-credentials: false
 
-      - name: Add SSH known host
-        run: |
-          mkdir -p ~/.ssh
-          ssh-keyscan -H ${{ secrets.SSH_HOST }} >> ~/.ssh/known_hosts
+      - name: Package build context
+        run: sh scripts/package-deploy.sh
 
-      - name: Deploy over SSH
-        uses: appleboy/ssh-action@v1.2.0
+      - name: Upload deployment files
+        uses: actions/upload-artifact@v4
         with:
-          host: ${{ secrets.SSH_HOST }}
-          username: ${{ secrets.SSH_USER }}
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          port: ${{ secrets.SSH_PORT || 22 }}
-          script: |
-            set -e
-            cd chatbot
-            git fetch origin
-            git reset --hard origin/main
-            sudo docker compose -f docker-compose.prod.yaml up --build -d --remove-orphans
+          name: chatbot-deploy-${{ github.sha }}
+          path: |
+            docker-compose.prod.yaml
+            scripts/deploy.sh
+            chatbot-${{ github.sha }}.tar.gz
+          if-no-files-found: error
+          retention-days: 3
+
+  deploy:
+    needs: package
+    if: github.repository == 'ia-texto/chatbot' && github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: [self-hosted, Linux, X64, chatbot-production]
+    environment: production
+    timeout-minutes: 30
+    env:
+      DEPLOY_PATH: ${{ vars.DEPLOY_PATH }}
+      DEPLOY_SHA: ${{ github.sha }}
+      ARTIFACT_NAME: chatbot-deploy-${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - name: Download deployment files
+        uses: actions/download-artifact@v4
+        with:
+          name: chatbot-deploy-${{ github.sha }}
+          path: ${{ runner.temp }}/${{ env.ARTIFACT_NAME }}
+
+      - name: Deploy locally
+        shell: bash
+        run: |
+          set -euo pipefail
+          artifact_path="$RUNNER_TEMP/$ARTIFACT_NAME"
+          : "${DEPLOY_PATH:?Configure DEPLOY_PATH no ambiente production.}"
+          test -d "$DEPLOY_PATH"
+          test -f "$DEPLOY_PATH/.env"
+          install -m 0644 "$artifact_path/docker-compose.prod.yaml" "$DEPLOY_PATH/docker-compose.prod.yaml"
+          install -m 0644 "$artifact_path/chatbot-${DEPLOY_SHA}.tar.gz" "$DEPLOY_PATH/chatbot-${DEPLOY_SHA}.tar.gz"
+          sh "$artifact_path/scripts/deploy.sh"
+
+      - name: Clean deployment artifact
+        if: always()
+        shell: bash
+        run: rm -rf -- "$RUNNER_TEMP/$ARTIFACT_NAME"

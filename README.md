@@ -2,6 +2,102 @@
 
 Um chatbot inteligente baseado em RAG (Retrieval-Augmented Generation) para o sistema IntegraCAR, desenvolvido com Django, Vue.js e LangChain.
 
+## Consultas organizadas e exportáveis
+
+O histórico agora permite buscar conversas pelo nome (sem diferenciar acentos ou
+maiúsculas) e renomeá-las com até 50 caracteres. Usuários autenticados também
+podem baixar a consulta em Markdown pelo botão **Exportar consulta**. O arquivo
+inclui perguntas, respostas e trechos das fontes recuperadas. Ao navegar entre
+versões editadas, apenas a ramificação selecionada é exportada.
+
+Renomeação e exportação são restritas ao proprietário da conversa. A exportação
+fica indisponível enquanto a resposta é gerada. Não há migrações nem novas
+dependências para esta entrega.
+
+Roteiro de demonstração:
+
+1. Entre na conta e faça uma pergunta sobre o CAR.
+2. Renomeie a conversa para “Documentação CAR”.
+3. Busque “documentacao” no histórico para reencontrá-la.
+4. Edite uma pergunta e alterne entre as versões com as setas.
+5. Clique em **Exportar consulta** e confira o arquivo `.md`: ele contém apenas
+   a versão selecionada e os trechos das fontes, quando recuperadas.
+
+Validação local:
+
+```bash
+npm run build
+npm run typecheck
+.venv/bin/python manage.py test chat.tests --noinput
+```
+
+Os testes de histórico cobrem ramificações, caminhos inválidos, conteúdo da
+exportação, validação do nome e restrições de acesso. Usam objetos simulados no
+acesso ao banco; o roteiro acima complementa a validação na aplicação com banco
+e serviço de IA em execução.
+
+## Recuperação adaptativa do agente
+
+A triagem agora pode planejar até duas consultas complementares para dúvidas com
+assuntos distintos, usando a mesma chamada de IA já existente. O fluxo consulta
+esses aspectos antes de gerar a resposta e combina os trechos sem duplicar fontes
+nem alterar os números já atribuídos. Se não houver evidência, tenta a pergunta
+original quando ela difere da busca reescrita e ainda há orçamento disponível.
+Sem fontes após essas tentativas, mantém a resposta de informação insuficiente.
+
+O planejamento e as ferramentas dos especialistas compartilham o limite de duas
+buscas adicionais por resposta e de 18 fontes. Buscas repetidas, inclusive com
+variações de acento ou caixa, não disparam nova recuperação nem gastam tentativas.
+Perguntas simples sem consultas planejadas mantêm uma única busca inicial quando
+ela retorna trechos. Cada busca extra pode acrescentar latência e custo de
+embedding; não há nova chamada de geração dedicada ao planejamento.
+
+Cenário para demonstrar: pergunte “Como declarar APP e quais documentos preciso
+para iniciar o CAR?”. A triagem pode separar os aspectos da pergunta e o agente
+recebe os trechos complementares antes de responder. A escolha das consultas é
+feita pelo modelo, portanto pode variar entre execuções.
+
+```bash
+.venv/bin/python manage.py test chat.tests.test_adaptive_retrieval --noinput
+```
+
+Os dez cenários controlados cobrem recuperação após busca vazia, preservação de
+termos da pergunta original, perguntas com múltiplos assuntos, estabilidade das
+citações, limites compartilhados, deduplicação de consultas e esclarecimento.
+Eles verificam o fluxo com agentes e recuperação simulados; ganhos de qualidade
+no acervo real ainda precisam ser avaliados com perguntas representativas.
+
+## Memória de evidências da conversa
+
+O agente recebe novamente snapshots dos trechos documentais das últimas 12
+mensagens da ramificação selecionada. A memória prioriza mensagens recentes e
+fontes citadas, com no máximo quatro trechos e 6.000 caracteres. Trechos que não
+cabem são ignorados sem truncar seu conteúdo. Mensagens antigas sem fontes salvas
+continuam funcionando normalmente.
+
+A triagem usa esses trechos para entender referências como “essa exceção”. Os
+especialistas recebem a união da busca atual com a memória, deduplicada por
+documento e conteúdo; fontes novas mantêm prioridade. Os trechos reutilizados são
+identificados como snapshots e ficam disponíveis na ferramenta de consulta, nas
+fontes salvas da nova resposta e, consequentemente, na exportação. O revisor
+recebe também o histórico com as citações remapeadas para os números atuais.
+Referências sem trecho disponível são marcadas como fora do contexto atual.
+
+A memória vem exclusivamente do histórico da ramificação fornecido pelo Django,
+sem estado global por usuário e sem recuperar outras conversas. Os snapshots não
+comprovam relevância nem vigência para a nova pergunta: os prompts orientam a
+conferir o suporte documental e buscar mais evidências quando necessário. A busca
+atual continua acontecendo e o limite total de 18 fontes permanece.
+
+```bash
+.venv/bin/python manage.py test chat.tests.test_evidence_memory --noinput
+```
+
+Os testes simulados cobrem continuidade, numeração, deduplicação, limites,
+compatibilidade com registros antigos, isolamento entre execuções e contexto do
+revisor. A avaliação da qualidade das respostas com o modelo real continua sendo
+necessária.
+
 ## 📋 Índice
 
 - [Visão Geral](#visão-geral)
@@ -213,7 +309,7 @@ def top_k_resultados(query: str, k: int = 5):
 | Revisor | Remove afirmações sem evidência e confere as citações |
 | Geral | Atende cumprimentos e informa o escopo do assistente |
 
-Os especialistas podem consultar orientações canônicas, buscar até duas vezes mais
+Os especialistas podem consultar orientações canônicas, usar o saldo das duas buscas complementares por resposta
 nos PDFs e examinar um trecho pelo número da fonte. Essas ferramentas são apenas
 de leitura; os trechos adicionais mantêm números estáveis na resposta. Cada
 especialista tem limite de quatro chamadas de ferramenta por execução. As
@@ -643,3 +739,73 @@ chatbot/
 ## 📝 Licença
 
 Este projeto é privado e de uso interno do IntegraCAR.
+
+
+## Deploy automático pelo GitHub Actions
+
+O workflow `.github/workflows/deploy.yaml` publica pushes na branch **main** de
+**ia-texto/chatbot** e permite execução manual em **Actions → Deploy to Production
+→ Run workflow**. Os deploys são serializados.
+
+O job `package` roda no GitHub, empacota somente os arquivos versionados necessários
+ao build e publica um artefato com retenção de três dias. O job `deploy` roda no
+servidor, baixa o artefato e executa `scripts/deploy.sh`, sem SSH e sem fazer
+`git reset` no diretório de produção. Os secrets `SSH_*` não são usados por esse
+workflow; não os remova se outros fluxos ainda dependerem deles.
+
+O pacote é validado e extraído antes do build Docker. Após construir a imagem,
+o script verifica o Django e aguarda o banco. Então para a aplicação e o
+`qcluster`; o `/start` existente aplica migrations, coleta estáticos e inicia o
+Gunicorn. O worker só é iniciado após o healthcheck HTTP da tela de login
+responder 200. Falhas na inicialização exibem os logs e interrompem o deploy.
+Há indisponibilidade entre a parada e a conclusão da inicialização; não há
+rollback automático de banco ou aplicação.
+
+### Configuração do servidor e do repositório
+
+1. No repositório **ia-texto/chatbot**, registre um runner Linux x64 dedicado, com
+   as labels `self-hosted`, `Linux`, `X64` e **`chatbot-production`**. Instale-o
+   como serviço, usando um usuário com acesso a `sudo -n docker`. O runner do
+   outro repositório não recebe jobs deste repositório automaticamente.
+2. Crie o ambiente **production**, restrinja-o à branch **main** e configure a
+   variável **`DEPLOY_PATH=/home/chatbot/chatbot`**, ajustando para o caminho real
+   da instalação existente. O usuário do runner precisa escrever nesse diretório.
+3. Preserve o `.env` de produção nesse diretório e a rede Docker externa `proxy`.
+   Mantenha o mesmo diretório e nome de projeto Compose da instalação anterior
+   para reutilizar os volumes `postgres_data`, `app_shared` e `static_volume`.
+   Caso a instalação use `COMPOSE_PROJECT_NAME`, preserve também esse valor.
+4. Verifique que Docker Compose suporta `up --wait --wait-timeout` e que há saída
+   HTTPS para GitHub Actions, artefatos, registries Docker e dependências Python
+   e npm. Habilite as atualizações automáticas do runner.
+
+O workflow instala apenas `docker-compose.prod.yaml` e o pacote do commit no
+diretório de produção. Não substitui o `.env` nem apaga volumes ou mídia. O código
+local desse diretório deixa de ser atualizado por `git reset`; a imagem é
+construída com o commit recebido pelo workflow.
+
+Restrinja a escrita no repositório e proteja a branch `main`: esse runner tem
+acesso à produção. Labels direcionam jobs, mas não restringem workflows, e a
+proteção do ambiente só se aplica aos jobs que declaram `environment: production`.
+Não execute código de PRs nesse runner.
+
+### Runner instalado no Superintegra
+
+O runner **superintegra-chatbot** está registrado em **IA-TEXTO/chatbot** com a
+label `chatbot-production`, instalado em `/home/chatbot/actions-runner-chatbot`.
+Executa como serviço systemd do usuário `chatbot`, com `Linger=yes` para iniciar
+após reboot e continuar ativo sem sessão SSH. O ambiente `production` permite
+somente a branch `main` e define `DEPLOY_PATH=/home/chatbot/chatbot`.
+
+No servidor, como `chatbot`:
+
+```bash
+systemctl --user status actions.runner.chatbot.service
+journalctl --user -u actions.runner.chatbot.service -n 100 --no-pager
+systemctl --user restart actions.runner.chatbot.service
+loginctl show-user chatbot -p Linger
+```
+
+O serviço fica em
+`~/.config/systemd/user/actions.runner.chatbot.service`. As credenciais do runner
+ficam somente no seu diretório de instalação; não copie esse diretório para o
+repositório ou para artefatos de build.
