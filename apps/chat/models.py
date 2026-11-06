@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from contas.models import Usuario
 from django.core.validators import FileExtensionValidator
 from django.db import models
 from django.db.models import Field
+from django.db.models.fields.files import FieldFile
 from django.db.models.lookups import PostgresOperatorLookup
 from django.utils import timezone
 from pgvector.django import VectorField
@@ -110,6 +113,37 @@ class Skill(models.Model):
     @property
     def arquivo(self) -> str:
         return f'{self.nome}.md'
+
+    @property
+    def pdfs_origem(self) -> list[tuple[str, FieldFile]]:
+        arquivos = [
+            (documento.nome, documento.arquivo)
+            for documento in self.documentos_origem.all()
+        ]
+        if self.arquivo_origem:
+            arquivos.insert(
+                0, (Path(self.arquivo_origem.name).name, self.arquivo_origem)
+            )
+        return arquivos
+
+
+class DocumentoSkill(models.Model):
+    skill = models.ForeignKey(
+        Skill,
+        on_delete=models.CASCADE,
+        related_name='documentos_origem',
+    )
+    nome = models.CharField(max_length=255)
+    arquivo = models.FileField(
+        upload_to='skills/',
+        validators=[FileExtensionValidator(['pdf'])],
+    )
+
+    class Meta:
+        ordering = ('id',)
+
+    def __str__(self):
+        return self.nome
 
 
 class RespostaCanonica(models.Model):

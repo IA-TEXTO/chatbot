@@ -54,7 +54,7 @@ class SkillGerada(BaseModel):
     )
     titulo: str
     documento: str = Field(
-        description='Nome oficial do documento, como aparece nele.',
+        description='Nomes oficiais de todos os documentos utilizados.',
     )
     descricao: str = Field(
         description='Quando a skill se aplica e quando não se aplica.',
@@ -64,7 +64,7 @@ class SkillGerada(BaseModel):
         description='Lista numerada em markdown com os passos de raciocínio.',
     )
     referencia: str = Field(
-        description='Conteúdo do documento reorganizado em markdown.',
+        description='Conteúdo conjunto dos documentos organizado em markdown.',
     )
     pontos_a_revisar: list[str] = Field(
         description='Inconsistências ou ambiguidades para o curador conferir.',

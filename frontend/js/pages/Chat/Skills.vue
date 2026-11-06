@@ -65,27 +65,31 @@ watch(() => props.skills, (novas) => {
     acompanharGeracao();
 });
 
-// Importação de PDF
+// Importação de PDFs
 const modalImportacao = ref<HTMLDialogElement | null>(null);
-const arquivoPdf = ref<File | null>(null);
+const arquivosPdf = ref<File[]>([]);
+const inputPdfs = ref<HTMLInputElement | null>(null);
 const enviando = ref(false);
 
 function abrirModalImportacao() {
-    arquivoPdf.value = null;
+    arquivosPdf.value = [];
+    if (inputPdfs.value) inputPdfs.value.value = '';
     modalImportacao.value?.showModal();
 }
 
 function selecionarPdf(event: Event) {
-    arquivoPdf.value = (event.target as HTMLInputElement).files?.[0] ?? null;
+    arquivosPdf.value = Array.from((event.target as HTMLInputElement).files ?? []);
 }
 
 function enviarPdf() {
-    if (!arquivoPdf.value) return;
+    if (!arquivosPdf.value.length || enviando.value) return;
     const formData = new FormData();
-    formData.append('arquivo', arquivoPdf.value);
+    arquivosPdf.value.forEach(arquivo => formData.append('arquivo', arquivo));
     enviando.value = true;
     router.post(page.props.urls['skills'], formData, {
-        onSuccess: () => modalImportacao.value?.close(),
+        onSuccess: (pagina) => {
+            if (!pagina.props.erro_importacao) modalImportacao.value?.close();
+        },
         onFinish: () => { enviando.value = false; },
     });
 }
@@ -170,7 +174,7 @@ function confirmarExclusao() {
                 <div class="rounded-2xl p-2 flex items-center justify-center">
                     <button @click="abrirModalImportacao" class="btn btn-primary btn-block md:btn-wide">
                         <i class="bi bi-file-earmark-arrow-up"></i>
-                        Criar skill a partir de PDF
+                        Criar skill a partir de PDFs
                     </button>
                 </div>
             </div>
@@ -179,7 +183,7 @@ function confirmarExclusao() {
             <div v-if="erroAcao" role="alert" class="alert alert-error">{{ erroAcao }}</div>
 
             <p v-if="skills.length === 0" class="py-8 text-center opacity-70">
-                Nenhuma skill cadastrada. Envie um PDF de fluxo ou procedimento para gerar a primeira.
+                Nenhuma skill cadastrada. Envie um ou mais PDFs de fluxo ou procedimento para gerar a primeira.
             </p>
 
             <div class="space-y-2">
@@ -189,12 +193,12 @@ function confirmarExclusao() {
                         <p class="truncate font-mono text-sm font-semibold">{{ skill.arquivo }}</p>
                         <p v-if="skill.titulo" class="truncate text-sm opacity-70">{{ skill.titulo }}</p>
                         <p v-else-if="skill.status === 'gerando'" class="text-sm opacity-70">
-                            Lendo o PDF e escrevendo o roteiro...
+                            Analisando os PDFs em conjunto e escrevendo o roteiro...
                         </p>
                         <p v-if="skill.status === 'erro'" class="text-sm text-error">{{ skill.observacoes }}</p>
                     </div>
 
-                    <div class="flex items-center gap-2">
+                    <div class="flex flex-wrap items-center gap-2">
                         <span class="badge" :class="statusSkill[skill.status].classe">
                             <span v-if="skill.status === 'gerando'" class="loading loading-spinner loading-xs"></span>
                             {{ statusSkill[skill.status].texto }}
@@ -209,9 +213,10 @@ function confirmarExclusao() {
                             @click="alternarAtivacao(skill)">
                             {{ skill.status === 'ativa' ? 'Desativar' : 'Ativar' }}
                         </button>
-                        <a v-if="skill.arquivo_origem" :href="skill.arquivo_origem" target="_blank"
-                            class="btn btn-ghost btn-sm btn-square" aria-label="Ver PDF de origem" title="Ver PDF de origem">
+                        <a v-for="(origem, indice) in skill.arquivos_origem" :key="indice" :href="origem.url" target="_blank" rel="noopener noreferrer"
+                            class="btn btn-ghost btn-sm" :aria-label="`Ver PDF: ${origem.nome}`" :title="origem.nome">
                             <i class="bi bi-file-earmark-pdf"></i>
+                            <span v-if="skill.arquivos_origem.length > 1">{{ indice + 1 }}</span>
                         </a>
                         <button class="btn btn-ghost btn-sm btn-square" @click="abrirModalExclusao(skill)"
                             aria-label="Excluir skill" title="Excluir skill">
@@ -224,16 +229,22 @@ function confirmarExclusao() {
             <!-- Modal de importação -->
             <dialog ref="modalImportacao" class="modal">
                 <div class="modal-box">
-                    <h3 class="font-bold text-lg">Criar skill a partir de PDF</h3>
+                    <h3 class="font-bold text-lg">Criar skill a partir de PDFs</h3>
                     <p class="py-3 text-sm opacity-70">
-                        O assistente lê o documento e escreve um rascunho de skill. Ele só passa a ser usado
+                        Selecione um ou mais PDFs. O assistente analisa todos em conjunto e cria um único
+                        rascunho de skill com o contexto combinado. Ele só passa a ser usado
                         depois que você revisar e ativar.
                     </p>
-                    <input type="file" accept=".pdf" @change="selecionarPdf"
+                    <input ref="inputPdfs" type="file" accept=".pdf" multiple @change="selecionarPdf"
+                        aria-label="Selecionar PDFs para criar uma skill" :disabled="enviando"
                         class="file-input file-input-bordered w-full" />
+                    <ul v-if="arquivosPdf.length" class="mt-3 list-disc space-y-1 pl-5 text-sm">
+                        <li v-for="(arquivo, indice) in arquivosPdf" :key="indice" class="break-words">{{ arquivo.name }}</li>
+                    </ul>
+                    <div v-if="erro_importacao" role="alert" class="alert alert-error mt-3">{{ erro_importacao }}</div>
                     <div class="modal-action">
                         <button class="btn" @click="modalImportacao?.close()">Cancelar</button>
-                        <button class="btn btn-primary" :disabled="!arquivoPdf || enviando" @click="enviarPdf">
+                        <button class="btn btn-primary" :disabled="!arquivosPdf.length || enviando" @click="enviarPdf">
                             <span v-if="enviando" class="loading loading-spinner loading-xs"></span>
                             Gerar skill
                         </button>

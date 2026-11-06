@@ -51,7 +51,7 @@ class ImportarDocumentosForm(forms.Form):
 
 
 class ImportarSkillForm(forms.Form):
-    arquivo = forms.FileField(
-        label='PDF do documento',
+    arquivo = MultipleFileField(
+        label='PDFs dos documentos',
         validators=[validators.FileExtensionValidator(['pdf'])],
     )

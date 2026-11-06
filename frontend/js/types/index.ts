@@ -22,6 +22,7 @@ export type Skill = {
     conteudo: string;
     observacoes: string;
     arquivo_origem: string | null;
+    arquivos_origem: { nome: string; url: string }[];
 }
 
 export type Usuario = {

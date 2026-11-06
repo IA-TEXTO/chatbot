@@ -1,4 +1,5 @@
 import logging
+from xml.sax.saxutils import escape
 
 from django.utils.text import slugify
 from langchain_community.document_loaders import PyPDFLoader
@@ -78,9 +79,6 @@ def gerar_embedding_documento(documento_id: int):
         raise
 
 
-MAX_CARACTERES_SKILL = 40_000
-
-
 def nome_skill_disponivel(base: str, *, ignorar_id: int | None = None) -> str:
     base = slugify(base)[:80] or 'skill'
     nome, sufixo = base, 2
@@ -106,16 +104,26 @@ def markdown_da_skill(gerada: SkillGerada) -> str:
 
 
 def gerar_skill_de_pdf(id_skill: int):
-    """Gera um rascunho de skill a partir do PDF; a ativação é manual."""
+    """Gera uma única skill com todos os PDFs; a ativação é manual."""
     skill = Skill.objects.get(id=id_skill, status=Skill.Status.GERANDO)
     try:
-        paginas = PyPDFLoader(skill.arquivo_origem.path, mode='single').load()
-        texto = ''.join(pagina.page_content for pagina in paginas).strip()
-        if not texto:
-            raise ValueError('O PDF não tem texto extraível.')
+        documentos = []
+        for nome, arquivo in skill.pdfs_origem:
+            paginas = PyPDFLoader(arquivo.path, mode='single').load()
+            texto = '\n\n'.join(
+                pagina.page_content for pagina in paginas
+            ).strip()
+            if not texto:
+                raise ValueError(f'O PDF {nome} não tem texto extraível.')
+            documentos.append(
+                f'<documento>\n<nome>{escape(nome)}</nome>\n'
+                f'<conteudo>\n{escape(texto)}\n</conteudo>\n</documento>'
+            )
+        if not documentos:
+            raise ValueError('Nenhum PDF de origem foi encontrado.')
 
         resultado = build_skill_writer().run(
-            f'<documento>\n{texto[:MAX_CARACTERES_SKILL]}\n</documento>',
+            '<documentos>\n' + '\n\n'.join(documentos) + '\n</documentos>',
             stream=False,
         )
         gerada = SkillGerada.model_validate(resultado.content)
@@ -129,7 +137,7 @@ def gerar_skill_de_pdf(id_skill: int):
             observacoes=(
                 f'Não foi possível gerar a skill: {erro}'
                 if isinstance(erro, ValueError)
-                else 'Não foi possível gerar a skill. Tente enviar o PDF '
+                else 'Não foi possível gerar a skill. Tente enviar os PDFs '
                 'novamente.'
             ),
         )

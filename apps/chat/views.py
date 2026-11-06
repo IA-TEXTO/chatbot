@@ -20,6 +20,7 @@ from chat.forms import ImportarDocumentosForm, ImportarSkillForm
 from chat.models import (
     Conversa,
     Documento,
+    DocumentoSkill,
     Mensagem,
     Skill,
     StatusDocumento,
@@ -187,7 +188,10 @@ class SkillsView(View):
             self.template_name,
             {
                 'skills': [
-                    serializar_skill(skill) for skill in Skill.objects.all()
+                    serializar_skill(skill)
+                    for skill in Skill.objects.prefetch_related(
+                        'documentos_origem'
+                    )
                 ],
                 'erro_importacao': erro_importacao,
             },
@@ -196,15 +200,21 @@ class SkillsView(View):
     def post(self, request: HttpRequest):
         form = ImportarSkillForm(request.POST, request.FILES)
         if not form.is_valid():
-            return self.get(request, 'Envie um arquivo PDF.')
+            return self.get(request, 'Envie um ou mais arquivos PDF válidos.')
 
-        arquivo = form.cleaned_data['arquivo']
-        skill = Skill.objects.create(
-            nome=nome_skill_disponivel(Path(arquivo.name).stem),
-            arquivo_origem=arquivo,
-            status=Skill.Status.GERANDO,
-        )
-        transaction.on_commit(lambda: async_task(gerar_skill_de_pdf, skill.id))
+        arquivos = form.cleaned_data['arquivo']
+        with transaction.atomic():
+            skill = Skill.objects.create(
+                nome=nome_skill_disponivel(Path(arquivos[0].name).stem),
+                status=Skill.Status.GERANDO,
+            )
+            for arquivo in arquivos:
+                DocumentoSkill.objects.create(
+                    skill=skill, nome=arquivo.name, arquivo=arquivo
+                )
+            transaction.on_commit(
+                lambda: async_task(gerar_skill_de_pdf, skill.id)
+            )
         return redirect('skills')
 
 

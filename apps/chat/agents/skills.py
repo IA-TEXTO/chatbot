@@ -126,6 +126,10 @@ def catalogo_skills(skills: dict[str, Skill]) -> str:
 
 
 def serializar_skill(skill: models.Skill) -> dict:
+    arquivos_origem = [
+        {'nome': nome, 'url': arquivo.url}
+        for nome, arquivo in skill.pdfs_origem
+    ]
     try:
         titulo = ler_markdown(skill.nome, skill.conteudo).titulo
     except ValueError:
@@ -139,6 +143,7 @@ def serializar_skill(skill: models.Skill) -> dict:
         'conteudo': skill.conteudo,
         'observacoes': skill.observacoes,
         'arquivo_origem': (
-            skill.arquivo_origem.url if skill.arquivo_origem else None
+            arquivos_origem[0]['url'] if arquivos_origem else None
         ),
+        'arquivos_origem': arquivos_origem,
     }
