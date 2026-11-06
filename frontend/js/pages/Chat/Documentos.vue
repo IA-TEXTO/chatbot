@@ -9,6 +9,7 @@ import { ref, watch } from 'vue';
 const documentoParaExcluir = ref<Documento | null>(null);
 const modalExclusao = ref<HTMLDialogElement | null>(null);
 const modalImportacao = ref<HTMLDialogElement | null>(null);
+const inputDocumentos = ref<HTMLInputElement | null>(null);
 
 function abrirModalExclusao(documento: Documento) {
     documentoParaExcluir.value = documento;
@@ -35,7 +36,8 @@ function abrirModalImportacao() {
 
 function fecharModalImportacao() {
     modalImportacao.value?.close();
-    documentosParaImportar.value = [{ arquivo: null, tipo: 'manual' }];
+    documentosParaImportar.value = [];
+    if (inputDocumentos.value) inputDocumentos.value.value = '';
 }
 
 
@@ -103,39 +105,31 @@ async function atualizarStatusDocumentosPendentes() {
 atualizarStatusDocumentosPendentes();
 
 type DocumentoParaImportar = {
-    arquivo: File | null;
+    arquivo: File;
     tipo: 'manual' | 'legislacao';
 };
 
-const documentosParaImportar = ref<DocumentoParaImportar[]>([
-    { arquivo: null, tipo: 'manual' }
-]);
-
-function adicionarDocumento() {
-    documentosParaImportar.value.push({ arquivo: null, tipo: 'manual' });
-}
+const documentosParaImportar = ref<DocumentoParaImportar[]>([]);
 
 function removerDocumento(index: number) {
-    if (documentosParaImportar.value.length > 1) {
-        documentosParaImportar.value.splice(index, 1);
-    }
+    documentosParaImportar.value.splice(index, 1);
 }
 
-function handleFileChange(index: number, event: Event) {
+function selecionarDocumentos(event: Event) {
     const target = event.target as HTMLInputElement;
-    if (target.files && target.files[0]) {
-        documentosParaImportar.value[index].arquivo = target.files[0];
+    for (const arquivo of Array.from(target.files ?? [])) {
+        documentosParaImportar.value.push({ arquivo, tipo: 'manual' });
     }
+    target.value = '';
 }
 
 function submit() {
+    if (!documentosParaImportar.value.length) return;
     const formData = new FormData();
 
     documentosParaImportar.value.forEach((doc, index) => {
-        if (doc.arquivo) {
-            formData.append(`documentos[${index}]`, doc.arquivo);
-            formData.append(`tipos[${index}]`, doc.tipo);
-        }
+        formData.append(`documentos[${index}]`, doc.arquivo);
+        formData.append(`tipos[${index}]`, doc.tipo);
     });
 
     router.post(page.props['urls']['documentos'], formData, {
@@ -287,36 +281,33 @@ async function atualizarTipoDocumento(documento: Documento, novoTipo: string) {
                 <div class="modal-box max-w-2xl">
                     <h3 class="font-bold text-lg mb-4">Adicionar Documentos</h3>
 
-                    <div class="space-y-3 max-h-96 overflow-y-auto bg-base-200 rounded p-3">
+                    <p class="mb-3 text-sm opacity-70">Selecione vários PDFs de uma vez. Você pode adicionar mais arquivos antes de enviar.</p>
+                    <input ref="inputDocumentos" type="file" accept=".pdf" multiple @change="selecionarDocumentos"
+                        aria-label="Selecionar documentos PDF"
+                        class="file-input file-input-bordered file-input-sm w-full mb-4" />
+
+                    <div v-if="documentosParaImportar.length" class="space-y-3 max-h-96 overflow-y-auto bg-base-200 rounded p-3">
                         <div v-for="(doc, index) in documentosParaImportar" :key="index"
                             class="flex gap-2 items-center">
-                            <div class="flex-1">
-                                <input type="file" accept=".pdf" @change="handleFileChange(index, $event)"
-                                    class="file-input file-input-bordered file-input-sm w-full" />
+                            <div class="min-w-0 flex-1">
+                                <p class="break-words text-sm">{{ doc.arquivo.name }}</p>
                             </div>
                             <div class="w-40">
-                                <select v-model="doc.tipo" class="select select-bordered select-sm w-full">
+                                <select v-model="doc.tipo" :aria-label="`Tipo de ${doc.arquivo.name}`" class="select select-bordered select-sm w-full">
                                     <option value="manual">Manual</option>
                                     <option value="legislacao">Legislação</option>
                                 </select>
                             </div>
-                            <button v-if="documentosParaImportar.length > 1" @click="removerDocumento(index)"
+                            <button @click="removerDocumento(index)" :aria-label="`Remover ${doc.arquivo.name}`"
                                 class="btn btn-sm btn-ghost btn-circle">
                                 <i class="bi bi-trash"></i>
                             </button>
                         </div>
                     </div>
 
-                    <div class="mt-4">
-                        <button @click="adicionarDocumento" class="btn btn-sm btn-outline w-full">
-                            <i class="bi bi-plus-lg"></i>
-                            Adicionar outro documento
-                        </button>
-                    </div>
-
                     <div class="modal-action">
                         <button class="btn" @click="fecharModalImportacao">Cancelar</button>
-                        <button class="btn btn-primary" @click="submit">Enviar</button>
+                        <button class="btn btn-primary" :disabled="!documentosParaImportar.length" @click="submit">Enviar</button>
                     </div>
                 </div>
                 <form method="dialog" class="modal-backdrop">
