@@ -2,6 +2,26 @@
 
 Um chatbot inteligente baseado em RAG (Retrieval-Augmented Generation) para o sistema IntegraCAR, desenvolvido com Django, Vue.js e LangChain.
 
+## API para integração com outro frontend
+
+A documentação pública fica em **`/api/docs`** (Swagger), e o contrato para
+ferramentas e geração de clientes fica em **`/api/openapi.json`**. O
+[guia de integração](core/api_guide.md), exibido também no Swagger, contém
+exemplos de perguntas, continuidade e edição de conversas, leitura do streaming
+NDJSON, fontes, autenticação atual, erros e propostas de endpoints.
+
+O chat já possui API, mas a integração independente ainda exige autenticação
+adequada, CORS conforme a implantação, isolamento e autorização consistentes,
+além de endpoints JSON para listar, recuperar e excluir conversas. O guia
+distingue as rotas existentes das propostas; a documentação pública não altera
+as permissões nem implementa essas propostas.
+
+Validação do contrato público, sem banco ou chamadas de IA:
+
+```bash
+.venv/bin/python manage.py test chat.tests.test_api_contract --noinput
+```
+
 ## Consultas organizadas e exportáveis
 
 O histórico agora permite buscar conversas pelo nome (sem diferenciar acentos ou

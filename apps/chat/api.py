@@ -22,7 +22,10 @@ from chat.schemas import (
     ChatSchema,
     CurtirMensagemSchema,
     EditarSkillSchema,
+    ErroChatSchema,
+    ErroGeracaoChatSchema,
     RenomearConversaSchema,
+    RespostaChatSchema,
 )
 
 logger = logging.getLogger(__name__)
@@ -84,7 +87,41 @@ def _obter_historico(
     )
 
 
-@chat_router.post('/chat')
+@chat_router.post(
+    '/chat',
+    tags=['Chat'],
+    summary='Enviar pergunta ou criar uma versão editada',
+    description=(
+        'Aceita acesso anônimo ou sessão Django. Com stream=false retorna JSON; '
+        'com stream=true retorna NDJSON (não é SSE). A primeira linha contém '
+        'os IDs; as demais usam tipo=progresso, skill, trecho, resposta_final '
+        'ou fontes. resposta_final substitui o texto acumulado. '
+        'Consulte o guia acima para continuidade, erros e limitações.'
+    ),
+    response={
+        200: RespostaChatSchema,
+        400: ErroChatSchema,
+        503: ErroGeracaoChatSchema,
+    },
+    openapi_extra={
+        'responses': {
+            200: {
+                'content': {
+                    'application/x-ndjson': {
+                        'schema': {'type': 'string'},
+                        'example': (
+                            '{"id_conversa":1,"id_mensagem_pergunta":2,'
+                            '"id_mensagem_resposta":3}\n'
+                            '{"tipo":"trecho","conteudo":"Olá"}\n'
+                            '{"tipo":"resposta_final","conteudo":"Olá"}\n'
+                            '{"tipo":"fontes","fontes":[]}\n'
+                        ),
+                    },
+                },
+            },
+        },
+    },
+)
 def chat_endpoint(request: HttpRequest, payload: ChatSchema):
     mensagem = payload.mensagem.strip()
     stream = payload.stream
@@ -263,13 +300,21 @@ def _stream_resposta(base_response, gerar_resposta, fontes, id_resposta):
     yield json.dumps({'tipo': 'fontes', 'fontes': fontes}) + '\n'
 
 
-@chat_router.get('/documentos/{id_documento}/status')
+@chat_router.get(
+    '/documentos/{id_documento}/status',
+    tags=['Documentos'],
+    summary='Consultar processamento de documento',
+)
 def status_documento(request: HttpRequest, id_documento: int):
     documento = get_object_or_404(Documento, id=id_documento)
     return {'status': documento.status}
 
 
-@chat_router.patch('/documentos/{id_documento}/tipo')
+@chat_router.patch(
+    '/documentos/{id_documento}/tipo',
+    tags=['Documentos'],
+    summary='Alterar tipo de documento (uso interno; ver limitações)',
+)
 def atualizar_tipo_documento(
     request: HttpRequest,
     id_documento: int,
@@ -284,7 +329,11 @@ def atualizar_tipo_documento(
     return 400, {'error': 'Tipo inválido'}
 
 
-@chat_router.patch('/mensagens/{id_mensagem}/curtir')
+@chat_router.patch(
+    '/mensagens/{id_mensagem}/curtir',
+    tags=['Chat'],
+    summary='Avaliar uma mensagem',
+)
 def curtir_mensagem(
     request: HttpRequest,
     id_mensagem: int,
@@ -296,7 +345,27 @@ def curtir_mensagem(
     return {'curtido': mensagem.curtido}
 
 
-@chat_router.get('/mensagens/{id_mensagem}/documentos/{id_documento}/arquivo')
+@chat_router.get(
+    '/mensagens/{id_mensagem}/documentos/{id_documento}/arquivo',
+    tags=['Chat'],
+    summary='Abrir PDF de uma fonte da resposta',
+    description='Requer sessão Django e mensagem pertencente ao usuário. Retorna application/pdf.',
+    openapi_extra={
+        'responses': {
+            200: {
+                'content': {
+                    'application/pdf': {
+                        'schema': {'type': 'string', 'format': 'binary'}
+                    }
+                }
+            },
+            403: {'description': 'É necessário entrar na conta.'},
+            404: {
+                'description': 'Mensagem ou documento indisponível para este usuário.'
+            },
+        },
+    },
+)
 def arquivo_fonte(request: HttpRequest, id_mensagem: int, id_documento: int):
     if not request.user.is_authenticated:
         raise HttpError(403, 'Entre na sua conta para abrir o PDF.')
@@ -336,14 +405,18 @@ def _validar_markdown(nome: str, conteudo: str):
         raise HttpError(400, str(erro)) from erro
 
 
-@chat_router.get('/skills/{id_skill}')
+@chat_router.get(
+    '/skills/{id_skill}', tags=['Skills (equipe)'], summary='Consultar skill'
+)
 def detalhar_skill(request: HttpRequest, id_skill: int):
     if not request.user.is_staff:
         raise HttpError(403, 'Somente a equipe pode gerenciar skills.')
     return serializar_skill(get_object_or_404(Skill, id=id_skill))
 
 
-@chat_router.put('/skills/{id_skill}')
+@chat_router.put(
+    '/skills/{id_skill}', tags=['Skills (equipe)'], summary='Editar skill'
+)
 def editar_skill(
     request: HttpRequest, id_skill: int, payload: EditarSkillSchema
 ):
@@ -354,7 +427,11 @@ def editar_skill(
     return serializar_skill(skill)
 
 
-@chat_router.patch('/skills/{id_skill}/status')
+@chat_router.patch(
+    '/skills/{id_skill}/status',
+    tags=['Skills (equipe)'],
+    summary='Ativar ou desativar skill',
+)
 def alterar_status_skill(
     request: HttpRequest, id_skill: int, payload: AlterarStatusSkillSchema
 ):
@@ -368,7 +445,11 @@ def alterar_status_skill(
     return serializar_skill(skill)
 
 
-@chat_router.patch('/conversas/{id_conversa}')
+@chat_router.patch(
+    '/conversas/{id_conversa}',
+    tags=['Conversas'],
+    summary='Renomear conversa do usuário autenticado',
+)
 def renomear_conversa(
     request: HttpRequest,
     id_conversa: int,
